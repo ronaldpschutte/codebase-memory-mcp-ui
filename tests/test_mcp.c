@@ -1372,8 +1372,9 @@ TEST(mcp_metadata_byte_budget) {
     ASSERT_NOT_NULL(json);
     /* 15 KiB covered the lean surface at the branch point; get_file_outline,
      * compare_graphs, manage_adr set_sections, and the search_code debug and
-     * list_projects include_details parameters landed on main since. */
-    ASSERT_LT((int)strlen(json), 20 * 1024);
+     * list_projects include_details parameters landed on main since.
+     * get_api_surface added in RFC 002. */
+    ASSERT_LT((int)strlen(json), 25 * 1024);
 
     yyjson_doc *doc = yyjson_read(json, strlen(json), 0);
     ASSERT_NOT_NULL(doc);
@@ -1431,6 +1432,7 @@ TEST(mcp_tools_have_behavior_annotations) {
         {"ingest_traces", true, false, true, false},
         {"export_diagram", true, false, true, false},
         {"analyze_blast_radius", true, false, true, false},
+        {"get_api_surface", true, false, true, false},
     };
 
     char *json = cbm_mcp_tools_list();
@@ -21909,9 +21911,6 @@ TEST(tool_result_add_notice_keeps_payload_shape_issue2144) {
     PASS();
 }
 
-
-TEST(tool_analyze_blast_radius_basic) {
-    const char *project = "test-blast-radius";
 /* ── Integer argument bounds ────────────────────────────────────────
  * Sizing arguments are clamped on both sides at the handler. The fixture
  * file is much longer than the `context` bound so the window is observable. */
@@ -22175,7 +22174,8 @@ TEST(tool_search_graph_limit_above_ceiling_is_capped) {
     PASS();
 }
 
-TEST(tool_trace_cursor_truncated_after_leg_is_rejected) {
+TEST(tool_analyze_blast_radius_basic) {
+    const char *project = "test-blast-radius";
     cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
     ASSERT_NOT_NULL(srv);
     cbm_store_t *st = cbm_mcp_server_store(srv);
@@ -22278,6 +22278,173 @@ TEST(tool_trace_cursor_truncated_after_leg_is_rejected) {
     free(resp);
 
     cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_get_api_surface_basic) {
+    const char *project = "test-api-surface";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-api-surface"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    /* 1. Insert ingress handler function */
+    cbm_node_t handler_node = {0};
+    handler_node.project = project;
+    handler_node.label = "Function";
+    handler_node.name = "handle_user_post";
+    handler_node.qualified_name = "src.api.users.handle_user_post";
+    handler_node.file_path = "src/api/users.c";
+    handler_node.start_line = 100;
+    handler_node.end_line = 120;
+    handler_node.properties_json = "{\"docstring\": \"Creates a new user account.\"}";
+    int64_t handler_id = cbm_store_upsert_node(st, &handler_node);
+    ASSERT(handler_id > 0);
+
+    /* 2. Insert downstream callee function */
+    cbm_node_t callee_node = {0};
+    callee_node.project = project;
+    callee_node.label = "Function";
+    callee_node.name = "db_insert_user";
+    callee_node.qualified_name = "src.db.users.db_insert_user";
+    callee_node.file_path = "src/db/users.c";
+    callee_node.start_line = 40;
+    callee_node.end_line = 60;
+    callee_node.properties_json = "{}";
+    int64_t callee_id = cbm_store_upsert_node(st, &callee_node);
+    ASSERT(callee_id > 0);
+
+    /* 3. Insert ingress Route node */
+    cbm_node_t route_node = {0};
+    route_node.project = project;
+    route_node.label = "Route";
+    route_node.name = "POST /api/v1/users";
+    route_node.qualified_name = "route.POST.api.v1.users";
+    route_node.file_path = "src/api/routes.c";
+    route_node.start_line = 10;
+    route_node.end_line = 15;
+    route_node.properties_json = "{\"method\": \"POST\", \"url_path\": \"/api/v1/users\", \"middleware\": [\"auth_guard\", \"rate_limit\"]}";
+    int64_t route_id = cbm_store_upsert_node(st, &route_node);
+    ASSERT(route_id > 0);
+
+    /* 4. Connect route -> handler (HANDLES) and handler -> callee (CALLS) */
+    cbm_edge_t e1 = {0};
+    e1.project = project;
+    e1.source_id = route_id;
+    e1.target_id = handler_id;
+    e1.type = "HANDLES";
+    e1.properties_json = "{}";
+    ASSERT(cbm_store_insert_edge(st, &e1) > 0);
+
+    cbm_edge_t e2 = {0};
+    e2.project = project;
+    e2.source_id = handler_id;
+    e2.target_id = callee_id;
+    e2.type = "CALLS";
+    e2.properties_json = "{}";
+    ASSERT(cbm_store_insert_edge(st, &e2) > 0);
+
+    /* 5. Insert egress HTTP_CALLS edge from handler to an external service */
+    cbm_edge_t e3 = {0};
+    e3.project = project;
+    e3.source_id = handler_id;
+    e3.target_id = callee_id;
+    e3.type = "HTTP_CALLS";
+    e3.properties_json = "{\"url_path\": \"/v1/charges\", \"method\": \"POST\", \"http_client\": \"stripe\", \"http_base_url\": \"https://api.stripe.com\"}";
+    ASSERT(cbm_store_insert_edge(st, &e3) > 0);
+
+    /* Call get_api_surface tool */
+    char *resp = cbm_mcp_handle_tool(
+        srv, "get_api_surface",
+        "{\"project\":\"test-api-surface\",\"direction\":\"all\"}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NULL(strstr(resp, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "\"total_ingress_routes\":1"));
+    ASSERT_NOT_NULL(strstr(resp, "\"total_egress_calls\":1"));
+    ASSERT_NOT_NULL(strstr(resp, "\"POST\":1"));
+    ASSERT_NOT_NULL(strstr(resp, "stripe"));
+    ASSERT_NOT_NULL(strstr(resp, "/api/v1/users"));
+    ASSERT_NOT_NULL(strstr(resp, "auth_guard"));
+    ASSERT_NOT_NULL(strstr(resp, "rate_limit"));
+    ASSERT_NOT_NULL(strstr(resp, "src.api.users.handle_user_post"));
+    ASSERT_NOT_NULL(strstr(resp, "Creates a new user account."));
+    ASSERT_NOT_NULL(strstr(resp, "/v1/charges"));
+    ASSERT_NOT_NULL(strstr(resp, "external_api"));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_get_api_surface_filtering) {
+    const char *project = "test-api-surface-filter";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-api-surface-filter"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    /* Insert route 1 (GET /api/v1/status) */
+    cbm_node_t r1 = {0};
+    r1.project = project;
+    r1.label = "Route";
+    r1.name = "GET /api/v1/status";
+    r1.qualified_name = "route.GET.api.v1.status";
+    r1.properties_json = "{\"method\": \"GET\", \"url_path\": \"/api/v1/status\"}";
+    ASSERT(cbm_store_upsert_node(st, &r1) > 0);
+
+    /* Insert route 2 (POST /api/v1/orders) */
+    cbm_node_t r2 = {0};
+    r2.project = project;
+    r2.label = "Route";
+    r2.name = "POST /api/v1/orders";
+    r2.qualified_name = "route.POST.api.v1.orders";
+    r2.properties_json = "{\"method\": \"POST\", \"url_path\": \"/api/v1/orders\"}";
+    ASSERT(cbm_store_upsert_node(st, &r2) > 0);
+
+    /* Test method filter: GET */
+    char *resp_get = cbm_mcp_handle_tool(
+        srv, "get_api_surface",
+        "{\"project\":\"test-api-surface-filter\",\"method\":\"GET\"}");
+    ASSERT_NOT_NULL(resp_get);
+    ASSERT_NULL(strstr(resp_get, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp_get, "/api/v1/status"));
+    ASSERT_NULL(strstr(resp_get, "/api/v1/orders"));
+    ASSERT_NOT_NULL(strstr(resp_get, "\"total_ingress_routes\":1"));
+    free(resp_get);
+
+    /* Test path pattern filter: orders */
+    char *resp_path = cbm_mcp_handle_tool(
+        srv, "get_api_surface",
+        "{\"project\":\"test-api-surface-filter\",\"path_pattern\":\"orders\"}");
+    ASSERT_NOT_NULL(resp_path);
+    ASSERT_NULL(strstr(resp_path, "\"isError\":true"));
+    ASSERT_NULL(strstr(resp_path, "/api/v1/status"));
+    ASSERT_NOT_NULL(strstr(resp_path, "/api/v1/orders"));
+    ASSERT_NOT_NULL(strstr(resp_path, "\"total_ingress_routes\":1"));
+    free(resp_path);
+
+    /* Test direction filter: egress (should have 0 ingress routes) */
+    char *resp_egress = cbm_mcp_handle_tool(
+        srv, "get_api_surface",
+        "{\"project\":\"test-api-surface-filter\",\"direction\":\"egress\"}");
+    ASSERT_NOT_NULL(resp_egress);
+    ASSERT_NULL(strstr(resp_egress, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp_egress, "\"total_ingress_routes\":0"));
+    free(resp_egress);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_trace_cursor_truncated_after_leg_is_rejected) {
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
     const char *proj = "cursor-leg";
     cbm_mcp_server_set_project(srv, proj);
     ASSERT_EQ(cbm_store_upsert_project(st, proj, "/tmp/cursor-leg"), CBM_STORE_OK);
@@ -22352,6 +22519,8 @@ TEST(search_code_rejects_quote_in_file_pattern) {
 
 SUITE(mcp) {
     RUN_TEST(tool_analyze_blast_radius_basic);
+    RUN_TEST(tool_get_api_surface_basic);
+    RUN_TEST(tool_get_api_surface_filtering);
     RUN_TEST(index_repository_async_and_status_refused_without_daemon_issue2144);
     RUN_TEST(index_repository_schema_documents_async_polling_issue2144);
     RUN_TEST(tool_result_add_notice_keeps_payload_shape_issue2144);

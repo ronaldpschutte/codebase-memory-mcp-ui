@@ -181,6 +181,36 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     ),
   },
   {
+    name: "get_api_surface",
+    category: "Tracing & Architecture",
+    summary: "Catalog all ingress API routes and egress external service calls with method, handler, and broker details",
+    description:
+      "Returns the complete API contract surface of a codebase, including ingress HTTP/RPC endpoints (routes, methods, controller handlers, middleware) and egress third-party HTTP calls, webhooks, and message broker queues.",
+    readOnly: true,
+    idempotent: true,
+    parameters: [
+      { name: "project", type: "string", required: true, description: "Target project identifier" },
+      { name: "direction", type: "string", required: false, defaultVal: "all", enumVals: ["all", "ingress", "egress"], description: "Filter by API direction: ingress (incoming routes), egress (outbound client calls), or all" },
+      { name: "method", type: "string", required: false, defaultVal: "ALL", enumVals: ["ALL", "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "WS"], description: "Optional HTTP method filter" },
+      { name: "path_pattern", type: "string", required: false, description: "Optional regex or substring to filter route URLs" },
+      { name: "group_by", type: "string", required: false, defaultVal: "flat", enumVals: ["flat", "file", "method", "service"], description: "Grouping layout for response" },
+    ],
+    cliExample: "cbm cli get_api_surface --project={PROJECT} --direction=all",
+    jsonExample: JSON.stringify(
+      {
+        name: "get_api_surface",
+        arguments: {
+          project: "{PROJECT}",
+          direction: "all",
+          method: "ALL",
+          group_by: "flat",
+        },
+      },
+      null,
+      2
+    ),
+  },
+  {
     name: "get_code_snippet",
     category: "Code Discovery",
     summary: "Fetch precise source code for a symbol, function, or line range",
