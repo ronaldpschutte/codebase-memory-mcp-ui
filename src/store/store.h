@@ -105,6 +105,13 @@ int cbm_store_find_nodes_by_file_overlap(cbm_store_t *s, const char *project, co
 int cbm_store_find_nodes_by_qn_suffix(cbm_store_t *s, const char *project, const char *suffix,
                                       cbm_node_t **out, int *count);
 
+/* Find callables whose signature-qualified QN (#2061) has `base` as its base
+ * QN (exact), or a base ending with "." + `base` (suffix_match). QNs without
+ * a callable identity suffix never match: this is the tier that lets a bare
+ * QN name every overload. */
+int cbm_store_find_nodes_by_qn_base(cbm_store_t *s, const char *project, const char *base,
+                                    bool suffix_match, cbm_node_t **out, int *count);
+
 /* Get CALLS degree of a node (inbound and outbound). */
 void cbm_store_node_degree(cbm_store_t *s, int64_t node_id, int *in_deg, int *out_deg);
 
@@ -427,11 +434,12 @@ int cbm_store_rollback(cbm_store_t *s);
 
 /* ── Bulk write optimization ────────────────────────────────────── */
 
-/* Tune pragmas for bulk write throughput (synchronous=OFF, large cache).
+/* Tune pragmas for bulk write throughput (synchronous=OFF, 64 MiB cache).
  * WAL journal mode is preserved throughout for crash safety. */
 int cbm_store_begin_bulk(cbm_store_t *s);
 
-/* Restore normal pragmas (synchronous=NORMAL, default cache) after bulk writes. */
+/* Restore normal pragmas (synchronous=NORMAL, the 64 MiB read-write cache)
+ * after bulk writes. */
 int cbm_store_end_bulk(cbm_store_t *s);
 
 /* Drop user indexes for faster bulk inserts. */
@@ -1087,5 +1095,80 @@ int cbm_store_exec(cbm_store_t *s, const char *sql);
  * be written at all (FTS5 compiled out — the caller decides whether that is
  * fatal); CBM_STORE_ERR on a genuine write failure. */
 int cbm_store_fts_rebuild(cbm_store_t *s, const char *project, int64_t after_id);
+
+/* ── Blast radius & impact analysis (RFC 001) ─────────────────── */
+
+typedef struct {
+    int max_depth;              /* 1..10, default 3 */
+    bool include_co_changes;    /* default true */
+} cbm_blast_radius_opts_t;
+
+typedef struct {
+    char *symbol_name;
+    char *qualified_name;
+    char *file_path;
+    int start_line;
+    int end_line;
+    int distance;               /* hops from target */
+    char *edge_type;            /* CALLS, USAGE, IMPORTS */
+    double importance;
+} cbm_blast_affected_node_t;
+
+typedef struct {
+    char *method;               /* GET, POST, etc. */
+    char *url_path;
+    char *handler_name;
+    char *file_path;
+    int line;
+    int distance;
+} cbm_blast_exposed_route_t;
+
+typedef struct {
+    char *test_symbol;
+    char *test_file;
+    int line;
+    char *test_type;            /* direct_test, caller_test */
+    int distance;
+} cbm_blast_covering_test_t;
+
+typedef struct {
+    char *file_path;
+    int co_commit_count;
+    double confidence;
+} cbm_blast_co_change_t;
+
+typedef struct {
+    char *target;
+    char *target_type;          /* Function, Class, File, etc. */
+    char *file_path;
+    int start_line;
+    int end_line;
+
+    double risk_score;          /* 0.0 .. 1.0 */
+    char *risk_level;           /* LOW, MEDIUM, HIGH */
+    char *risk_rationale;
+
+    int affected_symbols_count;
+    int affected_files_count;
+    int exposed_routes_count;
+    int covering_tests_count;
+    double test_coverage_ratio;
+
+    cbm_blast_affected_node_t *affected_symbols;
+    int affected_symbols_cap;
+
+    cbm_blast_exposed_route_t *exposed_routes;
+    int exposed_routes_cap;
+
+    cbm_blast_covering_test_t *covering_tests;
+    int covering_tests_cap;
+
+    cbm_blast_co_change_t *co_changes;
+    int co_changes_count;
+} cbm_blast_radius_result_t;
+
+int cbm_store_blast_radius(cbm_store_t *s, const char *project, const char *target,
+                           const cbm_blast_radius_opts_t *opts, cbm_blast_radius_result_t **out);
+void cbm_store_blast_radius_free(cbm_blast_radius_result_t *res);
 
 #endif /* CBM_STORE_H */
