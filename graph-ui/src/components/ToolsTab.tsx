@@ -211,6 +211,36 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     ),
   },
   {
+    name: "audit_test_coverage",
+    category: "Tracing & Architecture",
+    summary: "Audit test-to-code coverage mapping and discover high-priority untested entry points",
+    description:
+      "Audits test coverage mapping across a project using pre-computed test graph edges and architectural importance scores. Locates direct and indirect tests covering symbols, or surfaces critical untested functions and API entry points.",
+    readOnly: true,
+    idempotent: true,
+    parameters: [
+      { name: "project", type: "string", required: true, description: "Target project identifier" },
+      { name: "mode", type: "string", required: false, defaultVal: "gaps", enumVals: ["gaps", "symbol_tests", "summary"], description: "Operation mode: gaps (untested critical symbols), symbol_tests (tests covering a target), or summary" },
+      { name: "target", type: "string", required: false, description: "Qualified symbol name or file path (required for symbol_tests)" },
+      { name: "min_importance", type: "number", required: false, defaultVal: 1.0, description: "Minimum importance score threshold for reporting untested symbols in gaps mode" },
+      { name: "limit", type: "integer", required: false, defaultVal: 25, description: "Maximum number of untested symbols or tests to return (1-100)" },
+    ],
+    cliExample: "cbm cli audit_test_coverage --project={PROJECT} --mode=gaps",
+    jsonExample: JSON.stringify(
+      {
+        name: "audit_test_coverage",
+        arguments: {
+          project: "{PROJECT}",
+          mode: "gaps",
+          min_importance: 1.0,
+          limit: 25,
+        },
+      },
+      null,
+      2
+    ),
+  },
+  {
     name: "get_code_snippet",
     category: "Code Discovery",
     summary: "Fetch precise source code for a symbol, function, or line range",

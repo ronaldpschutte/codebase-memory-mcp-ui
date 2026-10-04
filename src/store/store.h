@@ -1238,4 +1238,70 @@ int cbm_store_api_surface(cbm_store_t *s, const char *project,
                           const cbm_api_surface_opts_t *opts, cbm_api_surface_result_t **out);
 void cbm_store_api_surface_free(cbm_api_surface_result_t *res);
 
+/* ── Test coverage audit catalog (RFC 003) ────────────────── */
+
+typedef struct {
+    char *mode;            /* "gaps", "symbol_tests", "summary" */
+    char *target;          /* qualified symbol name, name, or file path */
+    double min_importance; /* threshold for gaps mode, default 1.0 */
+    int limit;             /* max symbols or tests to return, default 25 */
+} cbm_audit_test_opts_t;
+
+typedef struct {
+    char *qualified_name;
+    char *file_path;
+    int line;
+    double importance;
+    bool is_entry_point;
+    int inbound_callers_count;
+    bool public_route_exposure;
+    char *route;           /* optional, NULL if none */
+    char *recommendation;
+} cbm_audit_untested_symbol_t;
+
+typedef struct {
+    char *test_symbol;
+    char *file_path;
+    int line;
+    char *edge_type;       /* "TESTS", "TESTS_FILE", "CALLS" */
+} cbm_audit_direct_test_t;
+
+typedef struct {
+    char *test_symbol;
+    char *file_path;
+    int line;
+    int distance;
+    char *call_path;
+} cbm_audit_indirect_test_t;
+
+typedef struct {
+    char *project;
+    char *mode;
+    char *target;
+    char *target_file;
+
+    /* Summary */
+    int total_production_functions;
+    int tested_production_functions;
+    int untested_entry_points;
+    int untested_critical_functions;
+
+    /* Gaps mode */
+    cbm_audit_untested_symbol_t *untested_symbols;
+    int untested_symbols_count;
+
+    /* Symbol tests mode */
+    cbm_audit_direct_test_t *direct_tests;
+    int direct_tests_count;
+
+    cbm_audit_indirect_test_t *indirect_tests;
+    int indirect_tests_count;
+} cbm_audit_test_result_t;
+
+int cbm_store_audit_test_coverage(cbm_store_t *s, const char *project,
+                                  const cbm_audit_test_opts_t *opts,
+                                  cbm_audit_test_result_t **out);
+void cbm_store_audit_test_result_free(cbm_audit_test_result_t *res);
+
 #endif /* CBM_STORE_H */
+

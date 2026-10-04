@@ -657,6 +657,18 @@ static const tool_def_t TOOLS[] = {
      "\"description\":\"Grouping layout for response: flat list, grouped by source file, or grouped by domain service.\"}},"
      "\"required\":[\"project\"]}"},
 
+    {"audit_test_coverage",
+     "Audits test coverage mapping across a project: finds tests covering a specific symbol/file, "
+     "or identifies critical untested entry points ranked by architectural importance score.",
+     "{\"type\":\"object\",\"properties\":{"
+     "\"project\":{\"type\":\"string\",\"description\":\"Target project identifier registered in Codebase Memory.\"},"
+     "\"mode\":{\"type\":\"string\",\"enum\":[\"gaps\",\"symbol_tests\",\"summary\"],\"default\":\"gaps\","
+     "\"description\":\"Operation mode: 'gaps' (untested critical symbols), 'symbol_tests' (tests covering a target), 'summary' (aggregate project test stats).\"},"
+     "\"target\":{\"type\":\"string\",\"description\":\"Qualified symbol name or file path (required when mode is 'symbol_tests').\"},"
+     "\"min_importance\":{\"type\":\"number\",\"default\":1.0,\"description\":\"Minimum importance score threshold for reporting untested symbols in 'gaps' mode.\"},"
+     "\"limit\":{\"type\":\"integer\",\"default\":25,\"minimum\":1,\"maximum\":100,\"description\":\"Maximum number of untested symbols or tests to return.\"}},"
+     "\"required\":[\"project\"]}"},
+
 
     {"get_code_snippet",
      "Read a search_graph symbol. auto bounds source and outlines large containers; full "
@@ -892,6 +904,7 @@ static const tool_annotation_def_t TOOL_ANNOTATIONS[] = {
     {"trace_path", true, false, true, false},
     {"analyze_blast_radius", true, false, true, false},
     {"get_api_surface", true, false, true, false},
+    {"audit_test_coverage", true, false, true, false},
     {"get_code_snippet", true, false, true, false},
     {"get_file_outline", true, false, true, false},
     {"get_graph_schema", true, false, true, false},
@@ -8602,6 +8615,157 @@ static char *handle_get_api_surface(cbm_mcp_server_t *srv, const char *args) {
     free(json);
     return mcp_res;
 }
+
+static char *handle_audit_test_coverage(cbm_mcp_server_t *srv, const char *args) {
+    char *project = get_project_arg(args);
+    cbm_store_t *store = resolve_store(srv, project);
+    if (!store && srv && srv->store) {
+        store = srv->store;
+    }
+    REQUIRE_STORE(store, project);
+
+    char *not_indexed = verify_project_indexed(store, project);
+    if (not_indexed && srv && srv->store == store && cbm_store_count_nodes(store, project) > 0) {
+        free(not_indexed);
+        not_indexed = NULL;
+    }
+    if (not_indexed) {
+        free(project);
+        return not_indexed;
+    }
+
+    char *mode = cbm_mcp_get_string_arg(args, "mode");
+    if (!mode || mode[0] == '\0') {
+        free(mode);
+        mode = strdup("gaps");
+    }
+    char *target = cbm_mcp_get_string_arg(args, "target");
+
+    if (strcmp(mode, "symbol_tests") == 0 && (!target || target[0] == '\0')) {
+        free(project);
+        free(mode);
+        free(target);
+        return cbm_mcp_text_result("target parameter is required when mode is 'symbol_tests'", true);
+    }
+
+    double min_importance = 1.0;
+    yyjson_doc *args_doc = args ? yyjson_read(args, strlen(args), 0) : NULL;
+    if (args_doc) {
+        yyjson_val *aroot = yyjson_doc_get_root(args_doc);
+        yyjson_val *mimp = yyjson_obj_get(aroot, "min_importance");
+        if (mimp && yyjson_is_num(mimp)) {
+            min_importance = yyjson_get_num(mimp);
+        }
+        yyjson_doc_free(args_doc);
+    }
+
+    int limit = cbm_mcp_get_int_arg(args, "limit", 25);
+
+    cbm_audit_test_opts_t opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.mode = mode;
+    opts.target = target;
+    opts.min_importance = min_importance;
+    opts.limit = limit;
+
+    cbm_audit_test_result_t *res = NULL;
+    int rc = cbm_store_audit_test_coverage(store, project, &opts, &res);
+    if (rc == CBM_STORE_NOT_FOUND) {
+        char err[CBM_SZ_512];
+        snprintf(err, sizeof(err), "symbol or file not found in project: '%s'", target ? target : "");
+        free(project);
+        free(mode);
+        free(target);
+        return cbm_mcp_text_result(err, true);
+    }
+    if (rc != CBM_STORE_OK || !res) {
+        char err[CBM_SZ_512];
+        snprintf(err, sizeof(err), "failed to audit test coverage for project '%s'", project ? project : "");
+        free(project);
+        free(mode);
+        free(target);
+        return cbm_mcp_text_result(err, true);
+    }
+
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+    yyjson_mut_val *root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
+
+    if (strcmp(mode, "symbol_tests") == 0) {
+        yyjson_mut_obj_add_str(doc, root, "target", res->target ? res->target : (target ? target : ""));
+        yyjson_mut_obj_add_str(doc, root, "file_path", res->target_file ? res->target_file : "");
+
+        yyjson_mut_val *direct_arr = yyjson_mut_arr(doc);
+        for (int i = 0; i < res->direct_tests_count; i++) {
+            cbm_audit_direct_test_t *dt = &res->direct_tests[i];
+            yyjson_mut_val *dobj = yyjson_mut_obj(doc);
+            yyjson_mut_obj_add_str(doc, dobj, "test_symbol", dt->test_symbol ? dt->test_symbol : "");
+            yyjson_mut_obj_add_str(doc, dobj, "file_path", dt->file_path ? dt->file_path : "");
+            yyjson_mut_obj_add_int(doc, dobj, "line", dt->line);
+            yyjson_mut_obj_add_str(doc, dobj, "edge_type", dt->edge_type ? dt->edge_type : "TESTS");
+            yyjson_mut_arr_add_val(direct_arr, dobj);
+        }
+        yyjson_mut_obj_add_val(doc, root, "direct_tests", direct_arr);
+
+        yyjson_mut_val *indirect_arr = yyjson_mut_arr(doc);
+        for (int i = 0; i < res->indirect_tests_count; i++) {
+            cbm_audit_indirect_test_t *it = &res->indirect_tests[i];
+            yyjson_mut_val *iobj = yyjson_mut_obj(doc);
+            yyjson_mut_obj_add_str(doc, iobj, "test_symbol", it->test_symbol ? it->test_symbol : "");
+            yyjson_mut_obj_add_str(doc, iobj, "file_path", it->file_path ? it->file_path : "");
+            yyjson_mut_obj_add_int(doc, iobj, "line", it->line);
+            yyjson_mut_obj_add_int(doc, iobj, "distance", it->distance);
+            yyjson_mut_obj_add_str(doc, iobj, "call_path", it->call_path ? it->call_path : "");
+            yyjson_mut_arr_add_val(indirect_arr, iobj);
+        }
+        yyjson_mut_obj_add_val(doc, root, "indirect_tests", indirect_arr);
+    } else {
+        yyjson_mut_obj_add_str(doc, root, "project", res->project ? res->project : (project ? project : ""));
+        yyjson_mut_obj_add_str(doc, root, "mode", res->mode ? res->mode : mode);
+
+        /* summary */
+        yyjson_mut_val *sum_obj = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_int(doc, sum_obj, "total_production_functions", res->total_production_functions);
+        yyjson_mut_obj_add_int(doc, sum_obj, "tested_production_functions", res->tested_production_functions);
+        yyjson_mut_obj_add_int(doc, sum_obj, "untested_entry_points", res->untested_entry_points);
+        yyjson_mut_obj_add_int(doc, sum_obj, "untested_critical_functions", res->untested_critical_functions);
+        yyjson_mut_obj_add_val(doc, root, "summary", sum_obj);
+
+        if (strcmp(mode, "gaps") == 0) {
+            yyjson_mut_val *gaps_arr = yyjson_mut_arr(doc);
+            for (int i = 0; i < res->untested_symbols_count; i++) {
+                cbm_audit_untested_symbol_t *sym = &res->untested_symbols[i];
+                yyjson_mut_val *sobj = yyjson_mut_obj(doc);
+                yyjson_mut_obj_add_str(doc, sobj, "qualified_name", sym->qualified_name ? sym->qualified_name : "");
+                yyjson_mut_obj_add_str(doc, sobj, "file_path", sym->file_path ? sym->file_path : "");
+                yyjson_mut_obj_add_int(doc, sobj, "line", sym->line);
+                yyjson_mut_obj_add_real(doc, sobj, "importance", sym->importance);
+                yyjson_mut_obj_add_bool(doc, sobj, "is_entry_point", sym->is_entry_point);
+                yyjson_mut_obj_add_int(doc, sobj, "inbound_callers_count", sym->inbound_callers_count);
+                yyjson_mut_obj_add_bool(doc, sobj, "public_route_exposure", sym->public_route_exposure);
+                if (sym->public_route_exposure && sym->route) {
+                    yyjson_mut_obj_add_str(doc, sobj, "route", sym->route);
+                }
+                yyjson_mut_obj_add_str(doc, sobj, "recommendation", sym->recommendation ? sym->recommendation : "");
+                yyjson_mut_arr_add_val(gaps_arr, sobj);
+            }
+            yyjson_mut_obj_add_val(doc, root, "critical_untested_symbols", gaps_arr);
+        }
+    }
+
+    char *json = yy_doc_to_str(doc);
+    yyjson_mut_doc_free(doc);
+
+    cbm_store_audit_test_result_free(res);
+    free(project);
+    free(mode);
+    free(target);
+
+    char *mcp_res = cbm_mcp_text_result(json, false);
+    free(json);
+    return mcp_res;
+}
+
 
 
 
@@ -18688,6 +18852,9 @@ static char *dispatch_tool(cbm_mcp_server_t *srv, const char *tool_name, const c
     }
     if (strcmp(tool_name, "get_api_surface") == 0) {
         return handle_get_api_surface(srv, args_json);
+    }
+    if (strcmp(tool_name, "audit_test_coverage") == 0) {
+        return handle_audit_test_coverage(srv, args_json);
     }
 
 
