@@ -11209,3 +11209,376 @@ int cbm_store_api_surface(cbm_store_t *s, const char *project,
     *out = res;
     return CBM_STORE_OK;
 }
+
+/* ── Test coverage audit catalog (RFC 003) ────────────────── */
+
+void cbm_store_audit_test_result_free(cbm_audit_test_result_t *res) {
+    if (!res) {
+        return;
+    }
+    free(res->project);
+    free(res->mode);
+    free(res->target);
+    free(res->target_file);
+
+    if (res->untested_symbols) {
+        for (int i = 0; i < res->untested_symbols_count; i++) {
+            cbm_audit_untested_symbol_t *sym = &res->untested_symbols[i];
+            free(sym->qualified_name);
+            free(sym->file_path);
+            free(sym->route);
+            free(sym->recommendation);
+        }
+        free(res->untested_symbols);
+    }
+
+    if (res->direct_tests) {
+        for (int i = 0; i < res->direct_tests_count; i++) {
+            cbm_audit_direct_test_t *dt = &res->direct_tests[i];
+            free(dt->test_symbol);
+            free(dt->file_path);
+            free(dt->edge_type);
+        }
+        free(res->direct_tests);
+    }
+
+    if (res->indirect_tests) {
+        for (int i = 0; i < res->indirect_tests_count; i++) {
+            cbm_audit_indirect_test_t *it = &res->indirect_tests[i];
+            free(it->test_symbol);
+            free(it->file_path);
+            free(it->call_path);
+        }
+        free(res->indirect_tests);
+    }
+
+    free(res);
+}
+
+int cbm_store_audit_test_coverage(cbm_store_t *s, const char *project,
+                                  const cbm_audit_test_opts_t *opts,
+                                  cbm_audit_test_result_t **out) {
+    if (!out) {
+        return CBM_STORE_ERR;
+    }
+    *out = NULL;
+    if (!s || !s->db || !project || project[0] == '\0') {
+        return CBM_STORE_ERR;
+    }
+
+    const char *mode = (opts && opts->mode && opts->mode[0] != '\0') ? opts->mode : "gaps";
+    double min_importance = (opts && opts->min_importance >= 0.0) ? opts->min_importance : 1.0;
+    int limit = (opts && opts->limit > 0) ? opts->limit : 25;
+    if (limit > 100) limit = 100;
+    if (limit < 1) limit = 1;
+
+    cbm_audit_test_result_t *res = calloc(1, sizeof(*res));
+    if (!res) {
+        return CBM_STORE_ERR;
+    }
+    res->project = strdup(project);
+    res->mode = strdup(mode);
+
+    if (strcmp(mode, "symbol_tests") == 0) {
+        const char *target = opts ? opts->target : NULL;
+        if (!target || target[0] == '\0') {
+            cbm_store_audit_test_result_free(res);
+            return CBM_STORE_ERR;
+        }
+
+        /* 1. Resolve target node */
+        const char *resolve_sql =
+            "SELECT id, name, qualified_name, file_path, start_line, end_line "
+            "FROM nodes "
+            "WHERE project = ?1 AND (qualified_name = ?2 OR name = ?2 OR file_path = ?2) "
+            "ORDER BY (qualified_name = ?2) DESC, (name = ?2) DESC "
+            "LIMIT 1;";
+
+        sqlite3_stmt *stmt = NULL;
+        if (sqlite3_prepare_v2(s->db, resolve_sql, -1, &stmt, NULL) != SQLITE_OK) {
+            cbm_store_audit_test_result_free(res);
+            return CBM_STORE_ERR;
+        }
+        sqlite3_bind_text(stmt, 1, project, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 2, target, -1, SQLITE_STATIC);
+
+        if (sqlite3_step(stmt) != SQLITE_ROW) {
+            sqlite3_finalize(stmt);
+            cbm_store_audit_test_result_free(res);
+            return CBM_STORE_NOT_FOUND;
+        }
+
+        int64_t target_id = sqlite3_column_int64(stmt, 0);
+        const char *tname = (const char *)sqlite3_column_text(stmt, 1);
+        const char *tqn = (const char *)sqlite3_column_text(stmt, 2);
+        const char *tfp = (const char *)sqlite3_column_text(stmt, 3);
+
+        res->target = strdup(tname ? tname : (tqn ? tqn : target));
+        res->target_file = strdup(tfp ? tfp : "");
+        sqlite3_finalize(stmt);
+
+        /* 2. Direct tests query */
+        const char *direct_sql =
+            "SELECT "
+            "    coalesce(t.qualified_name, t.name) AS test_symbol, "
+            "    t.file_path, "
+            "    t.start_line, "
+            "    e.type "
+            "FROM edges e "
+            "JOIN nodes t ON e.source_id = t.id "
+            "WHERE e.project = ?1 "
+            "  AND e.target_id = ?2 "
+            "  AND (e.type IN ('TESTS', 'TESTS_FILE') "
+            "       OR json_extract(t.properties, '$.is_test') = 1 "
+            "       OR t.file_path LIKE 'tests/%' "
+            "       OR t.file_path LIKE 'test/%') "
+            "ORDER BY t.file_path ASC, t.start_line ASC "
+            "LIMIT ?3;";
+
+        if (sqlite3_prepare_v2(s->db, direct_sql, -1, &stmt, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, project, -1, SQLITE_STATIC);
+            sqlite3_bind_int64(stmt, 2, target_id);
+            sqlite3_bind_int(stmt, 3, limit);
+
+            int dt_cap = 16;
+            res->direct_tests = malloc(dt_cap * sizeof(cbm_audit_direct_test_t));
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                const char *tsym = (const char *)sqlite3_column_text(stmt, 0);
+                const char *tfp2 = (const char *)sqlite3_column_text(stmt, 1);
+                int tline = sqlite3_column_int(stmt, 2);
+                const char *etype = (const char *)sqlite3_column_text(stmt, 3);
+
+                if (res->direct_tests_count >= dt_cap) {
+                    dt_cap *= 2;
+                    cbm_audit_direct_test_t *grown = realloc(res->direct_tests, dt_cap * sizeof(cbm_audit_direct_test_t));
+                    if (grown) res->direct_tests = grown;
+                }
+                if (res->direct_tests && res->direct_tests_count < dt_cap) {
+                    cbm_audit_direct_test_t *dt = &res->direct_tests[res->direct_tests_count++];
+                    memset(dt, 0, sizeof(*dt));
+                    dt->test_symbol = strdup(tsym ? tsym : "");
+                    dt->file_path = strdup(tfp2 ? tfp2 : "");
+                    dt->line = tline;
+                    dt->edge_type = strdup(etype ? etype : "TESTS");
+                }
+            }
+            sqlite3_finalize(stmt);
+        }
+
+        /* 3. Indirect tests query via recursive upstream CTE */
+        const char *indirect_sql =
+            "WITH RECURSIVE caller_chain(node_id, depth, call_path, visited) AS ("
+            "    SELECT ?1, 0, ?4, ',' || CAST(?1 AS TEXT) || ',' "
+            "    UNION ALL "
+            "    SELECT e.source_id, c.depth + 1, coalesce(n.name, n.qualified_name) || ' -> ' || c.call_path, c.visited || CAST(e.source_id AS TEXT) || ',' "
+            "    FROM edges e "
+            "    JOIN caller_chain c ON e.target_id = c.node_id "
+            "    JOIN nodes n ON e.source_id = n.id "
+            "    WHERE e.project = ?2 "
+            "      AND e.type IN ('CALLS', 'USAGE') "
+            "      AND c.depth < 6 "
+            "      AND instr(c.visited, ',' || CAST(e.source_id AS TEXT) || ',') = 0 "
+            ") "
+            "SELECT DISTINCT "
+            "    coalesce(n.qualified_name, n.name) AS test_symbol, "
+            "    n.file_path, "
+            "    n.start_line, "
+            "    c.depth, "
+            "    c.call_path "
+            "FROM caller_chain c "
+            "JOIN nodes n ON c.node_id = n.id "
+            "WHERE c.depth > 0 "
+            "  AND (json_extract(n.properties, '$.is_test') = 1 "
+            "       OR n.file_path LIKE 'tests/%' "
+            "       OR n.file_path LIKE 'test/%' "
+            "       OR EXISTS (SELECT 1 FROM edges et WHERE et.project = ?2 AND et.target_id = n.id AND et.type = 'TESTS')) "
+            "  AND NOT EXISTS ("
+            "      SELECT 1 FROM edges ed "
+            "      WHERE ed.project = ?2 AND ed.source_id = n.id AND ed.target_id = ?1 "
+            "        AND (ed.type IN ('TESTS', 'TESTS_FILE') OR json_extract(n.properties, '$.is_test') = 1) "
+            "  ) "
+            "ORDER BY c.depth ASC "
+            "LIMIT ?3;";
+
+        if (sqlite3_prepare_v2(s->db, indirect_sql, -1, &stmt, NULL) == SQLITE_OK) {
+            sqlite3_bind_int64(stmt, 1, target_id);
+            sqlite3_bind_text(stmt, 2, project, -1, SQLITE_STATIC);
+            sqlite3_bind_int(stmt, 3, limit);
+            sqlite3_bind_text(stmt, 4, res->target ? res->target : "", -1, SQLITE_STATIC);
+
+            int it_cap = 16;
+            res->indirect_tests = malloc(it_cap * sizeof(cbm_audit_indirect_test_t));
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                const char *tsym = (const char *)sqlite3_column_text(stmt, 0);
+                const char *tfp2 = (const char *)sqlite3_column_text(stmt, 1);
+                int tline = sqlite3_column_int(stmt, 2);
+                int tdist = sqlite3_column_int(stmt, 3);
+                const char *tcpath = (const char *)sqlite3_column_text(stmt, 4);
+
+                if (res->indirect_tests_count >= it_cap) {
+                    it_cap *= 2;
+                    cbm_audit_indirect_test_t *grown = realloc(res->indirect_tests, it_cap * sizeof(cbm_audit_indirect_test_t));
+                    if (grown) res->indirect_tests = grown;
+                }
+                if (res->indirect_tests && res->indirect_tests_count < it_cap) {
+                    cbm_audit_indirect_test_t *it = &res->indirect_tests[res->indirect_tests_count++];
+                    memset(it, 0, sizeof(*it));
+                    it->test_symbol = strdup(tsym ? tsym : "");
+                    it->file_path = strdup(tfp2 ? tfp2 : "");
+                    it->line = tline;
+                    it->distance = tdist;
+                    it->call_path = strdup(tcpath ? tcpath : "");
+                }
+            }
+            sqlite3_finalize(stmt);
+        }
+
+        *out = res;
+        return CBM_STORE_OK;
+    }
+
+    /* Summary calculations for "gaps" and "summary" modes */
+    const char *summary_sql =
+        "SELECT "
+        "    COUNT(*) AS total_prod, "
+        "    coalesce(SUM(CASE WHEN has_test > 0 THEN 1 ELSE 0 END), 0) AS tested_prod, "
+        "    coalesce(SUM(CASE WHEN has_test = 0 AND is_entry_point = 1 THEN 1 ELSE 0 END), 0) AS untested_ep, "
+        "    coalesce(SUM(CASE WHEN has_test = 0 AND importance >= ?2 THEN 1 ELSE 0 END), 0) AS untested_crit "
+        "FROM ( "
+        "    SELECT "
+        "        n.id, "
+        "        coalesce(cast(json_extract(n.properties, '$.importance') AS REAL), 0.0) AS importance, "
+        "        coalesce(cast(json_extract(n.properties, '$.is_entry_point') AS INTEGER), 0) AS is_entry_point, "
+        "        (SELECT COUNT(*) FROM edges e "
+        "         JOIN nodes t ON e.source_id = t.id "
+        "         WHERE e.project = ?1 AND e.target_id = n.id "
+        "           AND (e.type = 'TESTS' OR json_extract(t.properties, '$.is_test') = 1 OR json_extract(t.properties, '$.is_test') = 'true') "
+        "        ) AS has_test "
+        "    FROM nodes n "
+        "    WHERE n.project = ?1 "
+        "      AND n.label IN ('Function', 'Method') "
+        "      AND (json_extract(n.properties, '$.is_test') IS NULL "
+        "           OR (json_extract(n.properties, '$.is_test') != 1 AND json_extract(n.properties, '$.is_test') != 'true')) "
+        "      AND n.label != 'Test' "
+        "      AND (n.file_path IS NULL OR (n.file_path NOT LIKE 'tests/%' AND n.file_path NOT LIKE 'test/%')) "
+        ");";
+
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(s->db, summary_sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, project, -1, SQLITE_STATIC);
+        sqlite3_bind_double(stmt, 2, min_importance);
+
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            res->total_production_functions = sqlite3_column_int(stmt, 0);
+            res->tested_production_functions = sqlite3_column_int(stmt, 1);
+            res->untested_entry_points = sqlite3_column_int(stmt, 2);
+            res->untested_critical_functions = sqlite3_column_int(stmt, 3);
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    if (strcmp(mode, "summary") == 0) {
+        *out = res;
+        return CBM_STORE_OK;
+    }
+
+    /* "gaps" mode: Untested critical symbols query */
+    const char *gaps_sql =
+        "SELECT "
+        "    n.id, "
+        "    n.name, "
+        "    coalesce(n.qualified_name, n.name) AS qn, "
+        "    n.file_path, "
+        "    n.start_line, "
+        "    coalesce(cast(json_extract(n.properties, '$.importance') AS REAL), 0.0) AS importance, "
+        "    coalesce(cast(json_extract(n.properties, '$.is_entry_point') AS INTEGER), 0) AS is_entry_point, "
+        "    (SELECT COUNT(*) FROM edges e_in WHERE e_in.project = ?1 AND e_in.target_id = n.id AND e_in.type = 'CALLS') AS caller_count, "
+        "    (SELECT COUNT(*) FROM edges e_r JOIN nodes r ON e_r.source_id = r.id AND r.label = 'Route' WHERE e_r.project = ?1 AND e_r.target_id = n.id) AS route_count, "
+        "    (SELECT coalesce(json_extract(r.properties, '$.url_path'), r.name) "
+        "     FROM edges e_r JOIN nodes r ON e_r.source_id = r.id AND r.label = 'Route' "
+        "     WHERE e_r.project = ?1 AND e_r.target_id = n.id LIMIT 1) AS route_url, "
+        "    (SELECT coalesce(json_extract(r.properties, '$.method'), 'ANY') "
+        "     FROM edges e_r JOIN nodes r ON e_r.source_id = r.id AND r.label = 'Route' "
+        "     WHERE e_r.project = ?1 AND e_r.target_id = n.id LIMIT 1) AS route_method "
+        "FROM nodes n "
+        "WHERE n.project = ?1 "
+        "  AND n.label IN ('Function', 'Method') "
+        "  AND (json_extract(n.properties, '$.is_test') IS NULL "
+        "       OR (json_extract(n.properties, '$.is_test') != 1 AND json_extract(n.properties, '$.is_test') != 'true')) "
+        "  AND n.label != 'Test' "
+        "  AND (n.file_path IS NULL OR (n.file_path NOT LIKE 'tests/%' AND n.file_path NOT LIKE 'test/%')) "
+        "  AND NOT EXISTS ( "
+        "      SELECT 1 FROM edges e_test "
+        "      JOIN nodes t ON e_test.source_id = t.id "
+        "      WHERE e_test.project = ?1 "
+        "        AND e_test.target_id = n.id "
+        "        AND (e_test.type = 'TESTS' OR json_extract(t.properties, '$.is_test') = 1 OR json_extract(t.properties, '$.is_test') = 'true') "
+        "  ) "
+        "  AND ( "
+        "      coalesce(cast(json_extract(n.properties, '$.importance') AS REAL), 0.0) >= ?2 "
+        "      OR json_extract(n.properties, '$.is_entry_point') = 1 "
+        "  ) "
+        "ORDER BY is_entry_point DESC, importance DESC "
+        "LIMIT ?3;";
+
+    if (sqlite3_prepare_v2(s->db, gaps_sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, project, -1, SQLITE_STATIC);
+        sqlite3_bind_double(stmt, 2, min_importance);
+        sqlite3_bind_int(stmt, 3, limit);
+
+        int sym_cap = 32;
+        res->untested_symbols = malloc(sym_cap * sizeof(cbm_audit_untested_symbol_t));
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const char *qn = (const char *)sqlite3_column_text(stmt, 2);
+            const char *fp = (const char *)sqlite3_column_text(stmt, 3);
+            int sline = sqlite3_column_int(stmt, 4);
+            double imp = sqlite3_column_double(stmt, 5);
+            int is_ep = sqlite3_column_int(stmt, 6);
+            int callers = sqlite3_column_int(stmt, 7);
+            int routes = sqlite3_column_int(stmt, 8);
+            const char *r_url = (const char *)sqlite3_column_text(stmt, 9);
+            const char *r_method = (const char *)sqlite3_column_text(stmt, 10);
+
+            if (res->untested_symbols_count >= sym_cap) {
+                sym_cap *= 2;
+                cbm_audit_untested_symbol_t *grown = realloc(res->untested_symbols, sym_cap * sizeof(cbm_audit_untested_symbol_t));
+                if (grown) res->untested_symbols = grown;
+            }
+
+            if (res->untested_symbols && res->untested_symbols_count < sym_cap) {
+                cbm_audit_untested_symbol_t *sym = &res->untested_symbols[res->untested_symbols_count++];
+                memset(sym, 0, sizeof(*sym));
+                sym->qualified_name = strdup(qn ? qn : "");
+                sym->file_path = strdup(fp ? fp : "");
+                sym->line = sline;
+                sym->importance = imp;
+                sym->is_entry_point = (is_ep != 0);
+                sym->inbound_callers_count = callers;
+                sym->public_route_exposure = (routes > 0);
+
+                char rec[512];
+                if (sym->public_route_exposure && r_url) {
+                    char route_str[256];
+                    snprintf(route_str, sizeof(route_str), "%s %s", r_method ? r_method : "ANY", r_url);
+                    sym->route = strdup(route_str);
+                    if (r_method && (strcmp(r_method, "DELETE") == 0 || strcmp(r_method, "POST") == 0 ||
+                                     strcmp(r_method, "PUT") == 0 || strcmp(r_method, "PATCH") == 0)) {
+                        snprintf(rec, sizeof(rec), "Public mutating route without automated tests. Add integration test for %s.", route_str);
+                    } else {
+                        snprintf(rec, sizeof(rec), "Public route without automated tests (%s). Add integration test.", route_str);
+                    }
+                } else if (sym->is_entry_point) {
+                    snprintf(rec, sizeof(rec), "Critical entry point (importance %.2f). Add dedicated test suite.", imp);
+                } else {
+                    snprintf(rec, sizeof(rec), "High architectural centrality (importance %.2f). Add dedicated unit test suite.", imp);
+                }
+                sym->recommendation = strdup(rec);
+            }
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    *out = res;
+    return CBM_STORE_OK;
+}
+

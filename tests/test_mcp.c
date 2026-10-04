@@ -1433,6 +1433,7 @@ TEST(mcp_tools_have_behavior_annotations) {
         {"export_diagram", true, false, true, false},
         {"analyze_blast_radius", true, false, true, false},
         {"get_api_surface", true, false, true, false},
+        {"audit_test_coverage", true, false, true, false},
     };
 
     char *json = cbm_mcp_tools_list();
@@ -22440,6 +22441,338 @@ TEST(tool_get_api_surface_filtering) {
     PASS();
 }
 
+TEST(tool_audit_test_gaps) {
+    const char *project = "test-audit-gaps";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-audit-gaps"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    /* 1. apply_graph_patch: entry point, importance 14.82, untested */
+    cbm_node_t n1 = {0};
+    n1.project = project;
+    n1.label = "Function";
+    n1.name = "apply_graph_patch";
+    n1.qualified_name = "src.pipeline.pipeline_incremental.apply_graph_patch";
+    n1.file_path = "src/pipeline/pipeline_incremental.c";
+    n1.start_line = 1420;
+    n1.end_line = 1480;
+    n1.properties_json = "{\"importance\": 14.82, \"is_entry_point\": 1}";
+    int64_t id1 = cbm_store_upsert_node(st, &n1);
+    ASSERT(id1 > 0);
+
+    /* 2. handle_delete_project: entry point with Route, importance 9.35, untested */
+    cbm_node_t n2 = {0};
+    n2.project = project;
+    n2.label = "Function";
+    n2.name = "handle_delete_project";
+    n2.qualified_name = "src.ui.http_server.handle_delete_project";
+    n2.file_path = "src/ui/http_server.c";
+    n2.start_line = 560;
+    n2.end_line = 590;
+    n2.properties_json = "{\"importance\": 9.35, \"is_entry_point\": 1}";
+    int64_t id2 = cbm_store_upsert_node(st, &n2);
+    ASSERT(id2 > 0);
+
+    /* Route for handle_delete_project */
+    cbm_node_t r = {0};
+    r.project = project;
+    r.label = "Route";
+    r.name = "DELETE /api/v1/projects/:name";
+    r.qualified_name = "route.DELETE.api.v1.projects";
+    r.properties_json = "{\"method\": \"DELETE\", \"url_path\": \"/api/v1/projects/:name\"}";
+    int64_t rid = cbm_store_upsert_node(st, &r);
+    ASSERT(rid > 0);
+
+    cbm_edge_t er = {0};
+    er.project = project;
+    er.source_id = rid;
+    er.target_id = id2;
+    er.type = "HANDLES";
+    er.properties_json = "{}";
+    ASSERT(cbm_store_insert_edge(st, &er) > 0);
+
+    /* 3. high_internal_helper: not entry point, importance 5.2 (>= 1.0), untested */
+    cbm_node_t n3 = {0};
+    n3.project = project;
+    n3.label = "Function";
+    n3.name = "high_internal_helper";
+    n3.qualified_name = "src.core.algo.high_internal_helper";
+    n3.file_path = "src/core/algo.c";
+    n3.start_line = 100;
+    n3.end_line = 120;
+    n3.properties_json = "{\"importance\": 5.20, \"is_entry_point\": 0}";
+    int64_t id3 = cbm_store_upsert_node(st, &n3);
+    ASSERT(id3 > 0);
+
+    /* 4. low_helper: importance 0.5 (< 1.0), is_entry_point: 0, should be filtered from gaps */
+    cbm_node_t n4 = {0};
+    n4.project = project;
+    n4.label = "Function";
+    n4.name = "low_helper";
+    n4.qualified_name = "src.util.helper.low_helper";
+    n4.file_path = "src/util/helper.c";
+    n4.start_line = 10;
+    n4.end_line = 20;
+    n4.properties_json = "{\"importance\": 0.50, \"is_entry_point\": 0}";
+    int64_t id4 = cbm_store_upsert_node(st, &n4);
+    ASSERT(id4 > 0);
+
+    /* 5. tested_func: covered by TESTS edge */
+    cbm_node_t n5 = {0};
+    n5.project = project;
+    n5.label = "Function";
+    n5.name = "tested_func";
+    n5.qualified_name = "src.db.store.tested_func";
+    n5.file_path = "src/db/store.c";
+    n5.start_line = 10;
+    n5.end_line = 30;
+    n5.properties_json = "{\"importance\": 20.0, \"is_entry_point\": 1}";
+    int64_t id5 = cbm_store_upsert_node(st, &n5);
+    ASSERT(id5 > 0);
+
+    cbm_node_t t = {0};
+    t.project = project;
+    t.label = "Function";
+    t.name = "test_store_init";
+    t.qualified_name = "tests.test_store.test_store_init";
+    t.file_path = "tests/test_store.c";
+    t.start_line = 1;
+    t.end_line = 20;
+    t.properties_json = "{\"is_test\": true}";
+    int64_t tid = cbm_store_upsert_node(st, &t);
+    ASSERT(tid > 0);
+
+    cbm_edge_t et = {0};
+    et.project = project;
+    et.source_id = tid;
+    et.target_id = id5;
+    et.type = "TESTS";
+    et.properties_json = "{}";
+    ASSERT(cbm_store_insert_edge(st, &et) > 0);
+
+    /* Call audit_test_coverage with mode: gaps */
+    char *resp = cbm_mcp_handle_tool(
+        srv, "audit_test_coverage",
+        "{\"project\":\"test-audit-gaps\",\"mode\":\"gaps\",\"min_importance\":1.0}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NULL(strstr(resp, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "\"total_production_functions\":5"));
+    ASSERT_NOT_NULL(strstr(resp, "\"tested_production_functions\":1"));
+    ASSERT_NOT_NULL(strstr(resp, "\"untested_entry_points\":2"));
+    ASSERT_NOT_NULL(strstr(resp, "\"untested_critical_functions\":3"));
+    ASSERT_NOT_NULL(strstr(resp, "apply_graph_patch"));
+    ASSERT_NOT_NULL(strstr(resp, "handle_delete_project"));
+    ASSERT_NOT_NULL(strstr(resp, "high_internal_helper"));
+    ASSERT_NULL(strstr(resp, "tested_func"));
+    ASSERT_NULL(strstr(resp, "low_helper"));
+    ASSERT_NOT_NULL(strstr(resp, "\"public_route_exposure\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "DELETE /api/v1/projects/:name"));
+    ASSERT_NOT_NULL(strstr(resp, "recommendation"));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_audit_symbol_tests) {
+    const char *project = "test-audit-symbol";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-audit-symbol"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    /* Target function: cbm_store_upsert_project */
+    cbm_node_t target = {0};
+    target.project = project;
+    target.label = "Function";
+    target.name = "cbm_store_upsert_project";
+    target.qualified_name = "src.store.store.cbm_store_upsert_project";
+    target.file_path = "src/store/store.c";
+    target.start_line = 500;
+    target.end_line = 530;
+    target.properties_json = "{}";
+    int64_t target_id = cbm_store_upsert_node(st, &target);
+    ASSERT(target_id > 0);
+
+    /* Direct test: test_project_lifecycle */
+    cbm_node_t dt = {0};
+    dt.project = project;
+    dt.label = "Function";
+    dt.name = "test_project_lifecycle";
+    dt.qualified_name = "tests.test_mcp.test_project_lifecycle";
+    dt.file_path = "tests/test_mcp.c";
+    dt.start_line = 11538;
+    dt.end_line = 11560;
+    dt.properties_json = "{\"is_test\": true}";
+    int64_t dt_id = cbm_store_upsert_node(st, &dt);
+    ASSERT(dt_id > 0);
+
+    cbm_edge_t e_dt = {0};
+    e_dt.project = project;
+    e_dt.source_id = dt_id;
+    e_dt.target_id = target_id;
+    e_dt.type = "TESTS";
+    e_dt.properties_json = "{}";
+    ASSERT(cbm_store_insert_edge(st, &e_dt) > 0);
+
+    /* Intermediate caller: cbm_cli_index */
+    cbm_node_t mid = {0};
+    mid.project = project;
+    mid.label = "Function";
+    mid.name = "cbm_cli_index";
+    mid.qualified_name = "src.cli.cli.cbm_cli_index";
+    mid.file_path = "src/cli/cli.c";
+    mid.start_line = 200;
+    mid.end_line = 250;
+    mid.properties_json = "{}";
+    int64_t mid_id = cbm_store_upsert_node(st, &mid);
+    ASSERT(mid_id > 0);
+
+    cbm_edge_t e_mid = {0};
+    e_mid.project = project;
+    e_mid.source_id = mid_id;
+    e_mid.target_id = target_id;
+    e_mid.type = "CALLS";
+    e_mid.properties_json = "{}";
+    ASSERT(cbm_store_insert_edge(st, &e_mid) > 0);
+
+    /* Indirect test: test_cli_index_command */
+    cbm_node_t it = {0};
+    it.project = project;
+    it.label = "Function";
+    it.name = "test_cli_index_command";
+    it.qualified_name = "tests.test_cli.test_cli_index_command";
+    it.file_path = "tests/test_cli.c";
+    it.start_line = 482;
+    it.end_line = 510;
+    it.properties_json = "{\"is_test\": true}";
+    int64_t it_id = cbm_store_upsert_node(st, &it);
+    ASSERT(it_id > 0);
+
+    cbm_edge_t e_it = {0};
+    e_it.project = project;
+    e_it.source_id = it_id;
+    e_it.target_id = mid_id;
+    e_it.type = "CALLS";
+    e_it.properties_json = "{}";
+    ASSERT(cbm_store_insert_edge(st, &e_it) > 0);
+
+    /* Call audit_test_coverage with mode: symbol_tests */
+    char *resp = cbm_mcp_handle_tool(
+        srv, "audit_test_coverage",
+        "{\"project\":\"test-audit-symbol\",\"mode\":\"symbol_tests\",\"target\":\"cbm_store_upsert_project\"}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NULL(strstr(resp, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "\"target\":\"cbm_store_upsert_project\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"file_path\":\"src/store/store.c\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"direct_tests\""));
+    ASSERT_NOT_NULL(strstr(resp, "test_project_lifecycle"));
+    ASSERT_NOT_NULL(strstr(resp, "\"edge_type\":\"TESTS\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"indirect_tests\""));
+    ASSERT_NOT_NULL(strstr(resp, "test_cli_index_command"));
+    ASSERT_NOT_NULL(strstr(resp, "\"distance\":2"));
+    ASSERT_NOT_NULL(strstr(resp, "test_cli_index_command -> cbm_cli_index -> cbm_store_upsert_project"));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_audit_test_excludes_test_nodes) {
+    const char *project = "test-audit-exclude";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-audit-exclude"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    /* Test function marked via is_test = true */
+    cbm_node_t t1 = {0};
+    t1.project = project;
+    t1.label = "Function";
+    t1.name = "test_internal_helper";
+    t1.qualified_name = "tests.test_internal.test_internal_helper";
+    t1.file_path = "tests/test_internal.c";
+    t1.properties_json = "{\"is_test\": true, \"importance\": 99.0}";
+    ASSERT(cbm_store_upsert_node(st, &t1) > 0);
+
+    /* Test fixture in tests/ */
+    cbm_node_t t2 = {0};
+    t2.project = project;
+    t2.label = "Function";
+    t2.name = "setup_mock_fixture";
+    t2.qualified_name = "tests.fixtures.setup_mock_fixture";
+    t2.file_path = "tests/fixture.c";
+    t2.properties_json = "{\"importance\": 88.0}";
+    ASSERT(cbm_store_upsert_node(st, &t2) > 0);
+
+    /* Real production function */
+    cbm_node_t prod = {0};
+    prod.project = project;
+    prod.label = "Function";
+    prod.name = "process_payment_flow";
+    prod.qualified_name = "src.billing.process_payment_flow";
+    prod.file_path = "src/billing.c";
+    prod.properties_json = "{\"importance\": 2.50, \"is_entry_point\": 1}";
+    ASSERT(cbm_store_upsert_node(st, &prod) > 0);
+
+    char *resp = cbm_mcp_handle_tool(
+        srv, "audit_test_coverage",
+        "{\"project\":\"test-audit-exclude\",\"mode\":\"gaps\"}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NULL(strstr(resp, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "\"total_production_functions\":1"));
+    ASSERT_NOT_NULL(strstr(resp, "\"untested_entry_points\":1"));
+    ASSERT_NOT_NULL(strstr(resp, "process_payment_flow"));
+    ASSERT_NULL(strstr(resp, "test_internal_helper"));
+    ASSERT_NULL(strstr(resp, "setup_mock_fixture"));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_audit_test_summary) {
+    const char *project = "test-audit-summary";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-audit-summary"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    cbm_node_t prod = {0};
+    prod.project = project;
+    prod.label = "Function";
+    prod.name = "auth_middleware";
+    prod.qualified_name = "src.auth.auth_middleware";
+    prod.file_path = "src/auth.c";
+    prod.properties_json = "{\"importance\": 3.50, \"is_entry_point\": 1}";
+    ASSERT(cbm_store_upsert_node(st, &prod) > 0);
+
+    char *resp = cbm_mcp_handle_tool(
+        srv, "audit_test_coverage",
+        "{\"project\":\"test-audit-summary\",\"mode\":\"summary\"}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NULL(strstr(resp, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "\"mode\":\"summary\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"total_production_functions\":1"));
+    ASSERT_NOT_NULL(strstr(resp, "\"tested_production_functions\":0"));
+    ASSERT_NOT_NULL(strstr(resp, "\"untested_entry_points\":1"));
+    ASSERT_NOT_NULL(strstr(resp, "\"untested_critical_functions\":1"));
+    ASSERT_NULL(strstr(resp, "\"critical_untested_symbols\""));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
 TEST(tool_trace_cursor_truncated_after_leg_is_rejected) {
     cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
     ASSERT_NOT_NULL(srv);
@@ -22521,6 +22854,10 @@ SUITE(mcp) {
     RUN_TEST(tool_analyze_blast_radius_basic);
     RUN_TEST(tool_get_api_surface_basic);
     RUN_TEST(tool_get_api_surface_filtering);
+    RUN_TEST(tool_audit_test_gaps);
+    RUN_TEST(tool_audit_symbol_tests);
+    RUN_TEST(tool_audit_test_excludes_test_nodes);
+    RUN_TEST(tool_audit_test_summary);
     RUN_TEST(index_repository_async_and_status_refused_without_daemon_issue2144);
     RUN_TEST(index_repository_schema_documents_async_polling_issue2144);
     RUN_TEST(tool_result_add_notice_keeps_payload_shape_issue2144);
