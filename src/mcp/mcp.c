@@ -643,6 +643,20 @@ static const tool_def_t TOOLS[] = {
      "\"description\":\"Output format style.\"}},"
      "\"required\":[\"target\",\"project\"]}"},
 
+    {"get_api_surface",
+     "Returns the complete API contract surface of a codebase, including ingress HTTP/RPC endpoints "
+     "(routes, methods, controller handlers) and egress third-party HTTP calls, webhooks, and message broker queues.",
+     "{\"type\":\"object\",\"properties\":{"
+     "\"project\":{\"type\":\"string\",\"description\":\"Target project identifier registered in Codebase Memory.\"},"
+     "\"direction\":{\"type\":\"string\",\"enum\":[\"all\",\"ingress\",\"egress\"],\"default\":\"all\","
+     "\"description\":\"Filter by API direction: ingress (incoming routes), egress (outbound client calls), or all.\"},"
+     "\"method\":{\"type\":\"string\",\"enum\":[\"ALL\",\"GET\",\"POST\",\"PUT\",\"PATCH\",\"DELETE\",\"OPTIONS\",\"HEAD\",\"WS\"],"
+     "\"default\":\"ALL\",\"description\":\"Optional HTTP method filter.\"},"
+     "\"path_pattern\":{\"type\":\"string\",\"description\":\"Optional regex or substring to filter route URLs (e.g. '/api/v1/*').\"},"
+     "\"group_by\":{\"type\":\"string\",\"enum\":[\"flat\",\"file\",\"method\",\"service\"],\"default\":\"flat\","
+     "\"description\":\"Grouping layout for response: flat list, grouped by source file, or grouped by domain service.\"}},"
+     "\"required\":[\"project\"]}"},
+
 
     {"get_code_snippet",
      "Read a search_graph symbol. auto bounds source and outlines large containers; full "
@@ -877,6 +891,7 @@ static const tool_annotation_def_t TOOL_ANNOTATIONS[] = {
     {"query_graph", true, false, true, false},
     {"trace_path", true, false, true, false},
     {"analyze_blast_radius", true, false, true, false},
+    {"get_api_surface", true, false, true, false},
     {"get_code_snippet", true, false, true, false},
     {"get_file_outline", true, false, true, false},
     {"get_graph_schema", true, false, true, false},
@@ -8444,6 +8459,150 @@ static char *handle_analyze_blast_radius(cbm_mcp_server_t *srv, const char *args
     free(json);
     return mcp_res;
 }
+
+static char *handle_get_api_surface(cbm_mcp_server_t *srv, const char *args) {
+    char *project = get_project_arg(args);
+    cbm_store_t *store = resolve_store(srv, project);
+    if (!store && srv && srv->store) {
+        store = srv->store;
+    }
+    REQUIRE_STORE(store, project);
+
+    char *not_indexed = verify_project_indexed(store, project);
+    if (not_indexed && srv && srv->store == store && cbm_store_count_nodes(store, project) > 0) {
+        free(not_indexed);
+        not_indexed = NULL;
+    }
+    if (not_indexed) {
+        free(project);
+        return not_indexed;
+    }
+
+    char *direction = cbm_mcp_get_string_arg(args, "direction");
+    char *method = cbm_mcp_get_string_arg(args, "method");
+    char *path_pattern = cbm_mcp_get_string_arg(args, "path_pattern");
+    char *group_by = cbm_mcp_get_string_arg(args, "group_by");
+
+    cbm_api_surface_opts_t opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.direction = direction;
+    opts.method = method;
+    opts.path_pattern = path_pattern;
+    opts.group_by = group_by;
+
+    cbm_api_surface_result_t *res = NULL;
+    int rc = cbm_store_api_surface(store, project, &opts, &res);
+    if (rc != CBM_STORE_OK || !res) {
+        char err[CBM_SZ_512];
+        snprintf(err, sizeof(err), "failed to query api surface for project '%s'", project ? project : "");
+        free(project);
+        free(direction);
+        free(method);
+        free(path_pattern);
+        free(group_by);
+        return cbm_mcp_text_result(err, true);
+    }
+
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+    yyjson_mut_val *root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
+
+    yyjson_mut_obj_add_str(doc, root, "project", res->project ? res->project : (project ? project : ""));
+
+    /* summary */
+    yyjson_mut_val *summary = yyjson_mut_obj(doc);
+    yyjson_mut_obj_add_int(doc, summary, "total_ingress_routes", res->total_ingress_routes);
+    yyjson_mut_obj_add_int(doc, summary, "total_egress_calls", res->total_egress_calls);
+
+    /* methods_breakdown */
+    yyjson_mut_val *mb = yyjson_mut_obj(doc);
+    if (res->count_get > 0) yyjson_mut_obj_add_int(doc, mb, "GET", res->count_get);
+    if (res->count_post > 0) yyjson_mut_obj_add_int(doc, mb, "POST", res->count_post);
+    if (res->count_put > 0) yyjson_mut_obj_add_int(doc, mb, "PUT", res->count_put);
+    if (res->count_patch > 0) yyjson_mut_obj_add_int(doc, mb, "PATCH", res->count_patch);
+    if (res->count_delete > 0) yyjson_mut_obj_add_int(doc, mb, "DELETE", res->count_delete);
+    if (res->count_options > 0) yyjson_mut_obj_add_int(doc, mb, "OPTIONS", res->count_options);
+    if (res->count_head > 0) yyjson_mut_obj_add_int(doc, mb, "HEAD", res->count_head);
+    if (res->count_ws > 0) yyjson_mut_obj_add_int(doc, mb, "WS", res->count_ws);
+    if (res->count_other > 0) yyjson_mut_obj_add_int(doc, mb, "OTHER", res->count_other);
+    yyjson_mut_obj_add_val(doc, summary, "methods_breakdown", mb);
+
+    /* external_clients_detected */
+    yyjson_mut_val *clients_arr = yyjson_mut_arr(doc);
+    for (int i = 0; i < res->external_clients_count; i++) {
+        yyjson_mut_arr_add_str(doc, clients_arr, res->external_clients_detected[i]);
+    }
+    yyjson_mut_obj_add_val(doc, summary, "external_clients_detected", clients_arr);
+
+    /* message_brokers_detected */
+    yyjson_mut_val *brokers_arr = yyjson_mut_arr(doc);
+    for (int i = 0; i < res->message_brokers_count; i++) {
+        yyjson_mut_arr_add_str(doc, brokers_arr, res->message_brokers_detected[i]);
+    }
+    yyjson_mut_obj_add_val(doc, summary, "message_brokers_detected", brokers_arr);
+
+    yyjson_mut_obj_add_val(doc, root, "summary", summary);
+
+    /* ingress_routes */
+    yyjson_mut_val *ingress_arr = yyjson_mut_arr(doc);
+    for (int i = 0; i < res->ingress_routes_count; i++) {
+        cbm_api_ingress_route_t *r = &res->ingress_routes[i];
+        yyjson_mut_val *robj = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_str(doc, robj, "method", r->method ? r->method : "ANY");
+        yyjson_mut_obj_add_str(doc, robj, "url_path", r->url_path ? r->url_path : "/");
+        yyjson_mut_obj_add_str(doc, robj, "handler_symbol", r->handler_symbol ? r->handler_symbol : "");
+        yyjson_mut_obj_add_str(doc, robj, "file_path", r->file_path ? r->file_path : "");
+        yyjson_mut_obj_add_int(doc, robj, "line", r->line);
+
+        yyjson_mut_val *marr = yyjson_mut_arr(doc);
+        for (int m = 0; m < r->middleware_count; m++) {
+            yyjson_mut_arr_add_str(doc, marr, r->middleware[m]);
+        }
+        yyjson_mut_obj_add_val(doc, robj, "middleware", marr);
+
+        yyjson_mut_obj_add_int(doc, robj, "downstream_callees_count", r->downstream_callees_count);
+        if (r->docstring && r->docstring[0] != '\0') {
+            yyjson_mut_obj_add_str(doc, robj, "docstring", r->docstring);
+        }
+        yyjson_mut_arr_add_val(ingress_arr, robj);
+    }
+    yyjson_mut_obj_add_val(doc, root, "ingress_routes", ingress_arr);
+
+    /* egress_calls */
+    yyjson_mut_val *egress_arr = yyjson_mut_arr(doc);
+    for (int i = 0; i < res->egress_calls_count; i++) {
+        cbm_api_egress_call_t *c = &res->egress_calls[i];
+        yyjson_mut_val *cobj = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_str(doc, cobj, "caller_symbol", c->caller_symbol ? c->caller_symbol : "");
+        yyjson_mut_obj_add_str(doc, cobj, "file_path", c->file_path ? c->file_path : "");
+        yyjson_mut_obj_add_int(doc, cobj, "line", c->line);
+        yyjson_mut_obj_add_str(doc, cobj, "client", c->client ? c->client : "http");
+        yyjson_mut_obj_add_str(doc, cobj, "method", c->method ? c->method : "CALL");
+        yyjson_mut_obj_add_str(doc, cobj, "target_url", c->target_url ? c->target_url : "");
+        yyjson_mut_obj_add_str(doc, cobj, "target_type", c->target_type ? c->target_type : "external_api");
+        yyjson_mut_arr_add_val(egress_arr, cobj);
+    }
+    yyjson_mut_obj_add_val(doc, root, "egress_calls", egress_arr);
+
+    if (group_by && strcmp(group_by, "flat") != 0) {
+        yyjson_mut_obj_add_str(doc, root, "group_by", group_by);
+    }
+
+    char *json = yy_doc_to_str(doc);
+    yyjson_mut_doc_free(doc);
+
+    cbm_store_api_surface_free(res);
+    free(project);
+    free(direction);
+    free(method);
+    free(path_pattern);
+    free(group_by);
+
+    char *mcp_res = cbm_mcp_text_result(json, false);
+    free(json);
+    return mcp_res;
+}
+
 
 
 /* Resolve edge types from args: explicit array > mode-based > default ("CALLS").
@@ -18526,6 +18685,9 @@ static char *dispatch_tool(cbm_mcp_server_t *srv, const char *tool_name, const c
     }
     if (strcmp(tool_name, "analyze_blast_radius") == 0) {
         return handle_analyze_blast_radius(srv, args_json);
+    }
+    if (strcmp(tool_name, "get_api_surface") == 0) {
+        return handle_get_api_surface(srv, args_json);
     }
 
 

@@ -1171,4 +1171,71 @@ int cbm_store_blast_radius(cbm_store_t *s, const char *project, const char *targ
                            const cbm_blast_radius_opts_t *opts, cbm_blast_radius_result_t **out);
 void cbm_store_blast_radius_free(cbm_blast_radius_result_t *res);
 
+/* ── Ingress & Egress API surface catalog (RFC 002) ────────── */
+
+typedef struct {
+    char *direction;    /* "all", "ingress", "egress" */
+    char *method;       /* "ALL", "GET", "POST", etc. */
+    char *path_pattern; /* optional regex or substring */
+    char *group_by;     /* "flat", "file", "method", "service" */
+} cbm_api_surface_opts_t;
+
+typedef struct {
+    char *method;
+    char *url_path;
+    char *handler_name;
+    char *handler_symbol; /* qualified_name or name */
+    char *file_path;
+    int line;
+    char **middleware;
+    int middleware_count;
+    int downstream_callees_count;
+    char *docstring;
+} cbm_api_ingress_route_t;
+
+typedef struct {
+    char *caller_symbol;
+    char *caller_name;
+    char *file_path;
+    int line;
+    char *client;
+    char *method;
+    char *target_url;
+    char *target_type;
+    char *http_base_url;
+    char *broker;
+} cbm_api_egress_call_t;
+
+typedef struct {
+    char *project;
+    char *group_by;
+    int total_ingress_routes;
+    int total_egress_calls;
+
+    int count_get;
+    int count_post;
+    int count_put;
+    int count_patch;
+    int count_delete;
+    int count_options;
+    int count_head;
+    int count_ws;
+    int count_other;
+
+    char **external_clients_detected;
+    int external_clients_count;
+    char **message_brokers_detected;
+    int message_brokers_count;
+
+    cbm_api_ingress_route_t *ingress_routes;
+    int ingress_routes_count;
+
+    cbm_api_egress_call_t *egress_calls;
+    int egress_calls_count;
+} cbm_api_surface_result_t;
+
+int cbm_store_api_surface(cbm_store_t *s, const char *project,
+                          const cbm_api_surface_opts_t *opts, cbm_api_surface_result_t **out);
+void cbm_store_api_surface_free(cbm_api_surface_result_t *res);
+
 #endif /* CBM_STORE_H */

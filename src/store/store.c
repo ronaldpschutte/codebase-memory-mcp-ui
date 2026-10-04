@@ -15,6 +15,8 @@
 #include "foundation/sha256.h"
 
 #include <math.h>
+#include <ctype.h>
+#include "yyjson/yyjson.h"
 
 enum {
     ST_COL_1 = 1,
@@ -10813,6 +10815,396 @@ int cbm_store_blast_radius(cbm_store_t *s, const char *project, const char *targ
              res->risk_level, S, res->affected_files_count, res->exposed_routes_count,
              res->covering_tests_count, C_test * 100.0);
     res->risk_rationale = strdup(rationale);
+
+    *out = res;
+    return CBM_STORE_OK;
+}
+
+/* ── Ingress & Egress API surface catalog (RFC 002) ────────── */
+
+static int api_strcasecmp(const char *s1, const char *s2) {
+    if (!s1 || !s2) return (s1 == s2) ? 0 : (s1 ? 1 : -1);
+    while (*s1 && *s2) {
+        int c1 = tolower((unsigned char)*s1);
+        int c2 = tolower((unsigned char)*s2);
+        if (c1 != c2) return c1 - c2;
+        s1++;
+        s2++;
+    }
+    return (unsigned char)*s1 - (unsigned char)*s2;
+}
+
+static void api_surface_add_unique(char ***list, int *count, int *cap, const char *str) {
+    if (!str || str[0] == '\0') return;
+    for (int i = 0; i < *count; i++) {
+        if (strcmp((*list)[i], str) == 0) return;
+    }
+    if (*count >= *cap) {
+        *cap = (*cap == 0) ? 8 : (*cap * 2);
+        char **grown = realloc(*list, *cap * sizeof(char *));
+        if (!grown) return;
+        *list = grown;
+    }
+    (*list)[(*count)++] = strdup(str);
+}
+
+static bool api_surface_matches_path(const char *url_path, const char *pattern, cbm_regex_t *re, bool re_valid) {
+    if (!pattern || pattern[0] == '\0') {
+        return true;
+    }
+    if (!url_path) {
+        return false;
+    }
+    if (re_valid) {
+        return cbm_regexec(re, url_path, 0, NULL, 0) == 0;
+    }
+    if (strchr(pattern, '*')) {
+        const char *star = strchr(pattern, '*');
+        size_t prefix_len = star - pattern;
+        if (prefix_len > 0 && strncmp(url_path, pattern, prefix_len) != 0) {
+            return false;
+        }
+        const char *suffix = star + 1;
+        if (*suffix != '\0') {
+            size_t url_len = strlen(url_path);
+            size_t suf_len = strlen(suffix);
+            if (url_len < suf_len || strcmp(url_path + url_len - suf_len, suffix) != 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+    return strstr(url_path, pattern) != NULL;
+}
+
+static bool api_surface_matches_method(const char *method, const char *filter) {
+    if (!filter || filter[0] == '\0' || api_strcasecmp(filter, "ALL") == 0) {
+        return true;
+    }
+    if (!method) {
+        return false;
+    }
+    return api_strcasecmp(method, filter) == 0;
+}
+
+static void api_surface_count_method(cbm_api_surface_result_t *res, const char *method) {
+    if (!method) {
+        res->count_other++;
+        return;
+    }
+    if (api_strcasecmp(method, "GET") == 0) res->count_get++;
+    else if (api_strcasecmp(method, "POST") == 0) res->count_post++;
+    else if (api_strcasecmp(method, "PUT") == 0) res->count_put++;
+    else if (api_strcasecmp(method, "PATCH") == 0) res->count_patch++;
+    else if (api_strcasecmp(method, "DELETE") == 0) res->count_delete++;
+    else if (api_strcasecmp(method, "OPTIONS") == 0) res->count_options++;
+    else if (api_strcasecmp(method, "HEAD") == 0) res->count_head++;
+    else if (api_strcasecmp(method, "WS") == 0 || api_strcasecmp(method, "WEBSOCKET") == 0) res->count_ws++;
+    else res->count_other++;
+}
+
+void cbm_store_api_surface_free(cbm_api_surface_result_t *res) {
+    if (!res) {
+        return;
+    }
+    free(res->project);
+    free(res->group_by);
+
+    if (res->external_clients_detected) {
+        for (int i = 0; i < res->external_clients_count; i++) {
+            free(res->external_clients_detected[i]);
+        }
+        free(res->external_clients_detected);
+    }
+    if (res->message_brokers_detected) {
+        for (int i = 0; i < res->message_brokers_count; i++) {
+            free(res->message_brokers_detected[i]);
+        }
+        free(res->message_brokers_detected);
+    }
+
+    if (res->ingress_routes) {
+        for (int i = 0; i < res->ingress_routes_count; i++) {
+            cbm_api_ingress_route_t *r = &res->ingress_routes[i];
+            free(r->method);
+            free(r->url_path);
+            free(r->handler_name);
+            free(r->handler_symbol);
+            free(r->file_path);
+            free(r->docstring);
+            if (r->middleware) {
+                for (int m = 0; m < r->middleware_count; m++) {
+                    free(r->middleware[m]);
+                }
+                free(r->middleware);
+            }
+        }
+        free(res->ingress_routes);
+    }
+
+    if (res->egress_calls) {
+        for (int i = 0; i < res->egress_calls_count; i++) {
+            cbm_api_egress_call_t *c = &res->egress_calls[i];
+            free(c->caller_symbol);
+            free(c->caller_name);
+            free(c->file_path);
+            free(c->client);
+            free(c->method);
+            free(c->target_url);
+            free(c->target_type);
+            free(c->http_base_url);
+            free(c->broker);
+        }
+        free(res->egress_calls);
+    }
+
+    free(res);
+}
+
+int cbm_store_api_surface(cbm_store_t *s, const char *project,
+                          const cbm_api_surface_opts_t *opts, cbm_api_surface_result_t **out) {
+    if (!out) {
+        return CBM_STORE_ERR;
+    }
+    *out = NULL;
+    if (!s || !s->db || !project || project[0] == '\0') {
+        return CBM_STORE_ERR;
+    }
+
+    const char *direction = opts && opts->direction ? opts->direction : "all";
+    bool do_ingress = (api_strcasecmp(direction, "egress") != 0);
+    bool do_egress = (api_strcasecmp(direction, "ingress") != 0);
+    const char *method_filter = opts && opts->method ? opts->method : "ALL";
+    const char *path_pattern = opts && opts->path_pattern ? opts->path_pattern : NULL;
+    const char *group_by = opts && opts->group_by ? opts->group_by : "flat";
+
+    cbm_regex_t re;
+    bool re_valid = false;
+    if (path_pattern && path_pattern[0] != '\0') {
+        if (cbm_regcomp(&re, path_pattern, CBM_REG_EXTENDED | CBM_REG_NOSUB | CBM_REG_ICASE) == CBM_REG_OK) {
+            re_valid = true;
+        }
+    }
+
+    cbm_api_surface_result_t *res = calloc(1, sizeof(*res));
+    if (!res) {
+        if (re_valid) cbm_regfree(&re);
+        return CBM_STORE_ERR;
+    }
+    res->project = strdup(project);
+    res->group_by = strdup(group_by);
+
+    int clients_cap = 0;
+    int brokers_cap = 0;
+
+    /* 1. Query Ingress Routes */
+    if (do_ingress) {
+        const char *ingress_sql =
+            "SELECT "
+            "    r.id AS route_node_id, "
+            "    coalesce(json_extract(r.properties, '$.method'), 'ANY') AS http_method, "
+            "    coalesce(json_extract(r.properties, '$.url_path'), r.name) AS url_path, "
+            "    coalesce(json_extract(r.properties, '$.broker'), 'http') AS broker, "
+            "    r.file_path, "
+            "    r.start_line, "
+            "    h.name AS handler_name, "
+            "    h.qualified_name AS handler_qn, "
+            "    h.file_path AS handler_file, "
+            "    h.start_line AS handler_line, "
+            "    json_extract(h.properties, '$.docstring') AS handler_doc, "
+            "    json_extract(r.properties, '$.middleware') AS middleware_json, "
+            "    (SELECT count(*) FROM edges ce WHERE ce.source_id = h.id AND ce.type IN ('CALLS', 'HTTP_CALLS', 'ASYNC_CALLS')) AS downstream_count "
+            "FROM nodes r "
+            "LEFT JOIN edges e ON (e.source_id = r.id AND e.type IN ('CALLS', 'HANDLES', 'DEFINES_METHOD')) "
+            "LEFT JOIN nodes h ON e.target_id = h.id "
+            "WHERE r.project = ?1 "
+            "  AND r.label = 'Route' "
+            "GROUP BY r.id "
+            "ORDER BY url_path ASC, http_method ASC;";
+
+        sqlite3_stmt *stmt = NULL;
+        if (sqlite3_prepare_v2(s->db, ingress_sql, -1, &stmt, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, project, -1, SQLITE_STATIC);
+
+            int route_cap = 32;
+            res->ingress_routes = malloc(route_cap * sizeof(cbm_api_ingress_route_t));
+
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                const char *m = (const char *)sqlite3_column_text(stmt, 1);
+                const char *u = (const char *)sqlite3_column_text(stmt, 2);
+                const char *b = (const char *)sqlite3_column_text(stmt, 3);
+                const char *rf = (const char *)sqlite3_column_text(stmt, 4);
+                int rline = sqlite3_column_int(stmt, 5);
+                const char *hn = (const char *)sqlite3_column_text(stmt, 6);
+                const char *hqn = (const char *)sqlite3_column_text(stmt, 7);
+                const char *hf = (const char *)sqlite3_column_text(stmt, 8);
+                int hline = sqlite3_column_int(stmt, 9);
+                const char *hdoc = (const char *)sqlite3_column_text(stmt, 10);
+                const char *mid_json = (const char *)sqlite3_column_text(stmt, 11);
+                int downstream = sqlite3_column_int(stmt, 12);
+
+                if (!api_surface_matches_method(m, method_filter)) {
+                    continue;
+                }
+                if (!api_surface_matches_path(u, path_pattern, &re, re_valid)) {
+                    continue;
+                }
+
+                api_surface_count_method(res, m);
+
+                if (b && api_strcasecmp(b, "http") != 0) {
+                    api_surface_add_unique(&res->message_brokers_detected, &res->message_brokers_count, &brokers_cap, b);
+                }
+
+                if (res->ingress_routes_count >= route_cap) {
+                    route_cap *= 2;
+                    cbm_api_ingress_route_t *grown = realloc(res->ingress_routes, route_cap * sizeof(cbm_api_ingress_route_t));
+                    if (grown) res->ingress_routes = grown;
+                }
+
+                if (res->ingress_routes && res->ingress_routes_count < route_cap) {
+                    cbm_api_ingress_route_t *route = &res->ingress_routes[res->ingress_routes_count++];
+                    memset(route, 0, sizeof(*route));
+                    route->method = strdup(m ? m : "ANY");
+                    route->url_path = strdup(u ? u : "/");
+                    route->handler_name = strdup(hn ? hn : "");
+                    route->handler_symbol = strdup(hqn ? hqn : (hn ? hn : ""));
+                    route->file_path = strdup(hf && hf[0] != '\0' ? hf : (rf ? rf : ""));
+                    route->line = (hline > 0) ? hline : rline;
+                    route->downstream_callees_count = downstream;
+                    if (hdoc && hdoc[0] != '\0') {
+                        route->docstring = strdup(hdoc);
+                    }
+
+                    if (mid_json && mid_json[0] != '\0') {
+                        yyjson_doc *mdoc = yyjson_read(mid_json, strlen(mid_json), 0);
+                        if (mdoc) {
+                            yyjson_val *mroot = yyjson_doc_get_root(mdoc);
+                            if (yyjson_is_arr(mroot)) {
+                                size_t mcount = yyjson_arr_size(mroot);
+                                if (mcount > 0) {
+                                    route->middleware = malloc(mcount * sizeof(char *));
+                                    route->middleware_count = 0;
+                                    size_t idx, max;
+                                    yyjson_val *mitem;
+                                    yyjson_arr_foreach(mroot, idx, max, mitem) {
+                                        const char *mstr = yyjson_get_str(mitem);
+                                        if (mstr) {
+                                            route->middleware[route->middleware_count++] = strdup(mstr);
+                                        }
+                                    }
+                                }
+                            }
+                            yyjson_doc_free(mdoc);
+                        }
+                    }
+                }
+            }
+            sqlite3_finalize(stmt);
+        }
+        res->total_ingress_routes = res->ingress_routes_count;
+    }
+
+    /* 2. Query Egress External Calls */
+    if (do_egress) {
+        const char *egress_sql =
+            "SELECT "
+            "    c.id AS caller_node_id, "
+            "    c.name AS caller_name, "
+            "    c.qualified_name AS caller_qn, "
+            "    c.file_path AS caller_file, "
+            "    c.start_line AS caller_line, "
+            "    e.type AS edge_type, "
+            "    json_extract(e.properties, '$.url_path') AS url_path, "
+            "    json_extract(e.properties, '$.method') AS method, "
+            "    json_extract(e.properties, '$.http_client') AS http_client, "
+            "    json_extract(e.properties, '$.http_base_url') AS http_base_url, "
+            "    json_extract(e.properties, '$.broker') AS broker "
+            "FROM edges e "
+            "JOIN nodes c ON e.source_id = c.id "
+            "WHERE e.project = ?1 "
+            "  AND e.type IN ('HTTP_CALLS', 'ASYNC_CALLS', 'CROSS_HTTP_CALLS', 'CROSS_ASYNC_CALLS') "
+            "ORDER BY c.file_path ASC, c.start_line ASC;";
+
+        sqlite3_stmt *stmt = NULL;
+        if (sqlite3_prepare_v2(s->db, egress_sql, -1, &stmt, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, project, -1, SQLITE_STATIC);
+
+            int call_cap = 32;
+            res->egress_calls = malloc(call_cap * sizeof(cbm_api_egress_call_t));
+
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                const char *cn = (const char *)sqlite3_column_text(stmt, 1);
+                const char *cqn = (const char *)sqlite3_column_text(stmt, 2);
+                const char *cf = (const char *)sqlite3_column_text(stmt, 3);
+                int cline = sqlite3_column_int(stmt, 4);
+                const char *etype = (const char *)sqlite3_column_text(stmt, 5);
+                const char *epath = (const char *)sqlite3_column_text(stmt, 6);
+                const char *emeth = (const char *)sqlite3_column_text(stmt, 7);
+                const char *client = (const char *)sqlite3_column_text(stmt, 8);
+                const char *base_url = (const char *)sqlite3_column_text(stmt, 9);
+                const char *broker = (const char *)sqlite3_column_text(stmt, 10);
+
+                if (emeth && !api_surface_matches_method(emeth, method_filter)) {
+                    continue;
+                }
+                const char *check_url = epath ? epath : (base_url ? base_url : "");
+                if (!api_surface_matches_path(check_url, path_pattern, &re, re_valid)) {
+                    continue;
+                }
+
+                if (client && client[0] != '\0') {
+                    api_surface_add_unique(&res->external_clients_detected, &res->external_clients_count, &clients_cap, client);
+                }
+                if (broker && broker[0] != '\0' && api_strcasecmp(broker, "http") != 0) {
+                    api_surface_add_unique(&res->message_brokers_detected, &res->message_brokers_count, &brokers_cap, broker);
+                }
+
+                if (res->egress_calls_count >= call_cap) {
+                    call_cap *= 2;
+                    cbm_api_egress_call_t *grown = realloc(res->egress_calls, call_cap * sizeof(cbm_api_egress_call_t));
+                    if (grown) res->egress_calls = grown;
+                }
+
+                if (res->egress_calls && res->egress_calls_count < call_cap) {
+                    cbm_api_egress_call_t *call = &res->egress_calls[res->egress_calls_count++];
+                    memset(call, 0, sizeof(*call));
+                    call->caller_name = strdup(cn ? cn : "");
+                    call->caller_symbol = strdup(cqn ? cqn : (cn ? cn : ""));
+                    call->file_path = strdup(cf ? cf : "");
+                    call->line = cline;
+                    call->client = strdup(client ? client : (broker ? broker : "http"));
+                    call->method = strdup(emeth ? emeth : "CALL");
+                    call->target_url = strdup(epath ? epath : (base_url ? base_url : ""));
+                    if (base_url) {
+                        call->http_base_url = strdup(base_url);
+                    }
+                    if (broker) {
+                        call->broker = strdup(broker);
+                    }
+
+                    /* Target type classification */
+                    if (broker && api_strcasecmp(broker, "http") != 0) {
+                        call->target_type = strdup("message_broker");
+                    } else if (etype && (strcmp(etype, "CROSS_HTTP_CALLS") == 0 || strcmp(etype, "CROSS_ASYNC_CALLS") == 0)) {
+                        call->target_type = strdup("cross_service_call");
+                    } else if (strstr(call->target_url, "://") != NULL || (base_url && base_url[0] != '\0')) {
+                        call->target_type = strdup("external_api");
+                    } else if (call->target_url[0] == '/') {
+                        call->target_type = strdup("internal_endpoint");
+                    } else {
+                        call->target_type = strdup("external_api");
+                    }
+                }
+            }
+            sqlite3_finalize(stmt);
+        }
+        res->total_egress_calls = res->egress_calls_count;
+    }
+
+    if (re_valid) {
+        cbm_regfree(&re);
+    }
 
     *out = res;
     return CBM_STORE_OK;
