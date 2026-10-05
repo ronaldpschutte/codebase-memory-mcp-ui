@@ -12,9 +12,14 @@ export class RpcError extends Error {
   }
 }
 
+export interface CallOptions {
+  signal?: AbortSignal;
+}
+
 export async function callTool<T = unknown>(
   name: string,
   args: Record<string, unknown> = {},
+  options?: CallOptions,
 ): Promise<T> {
   const res = await fetch("/rpc", {
     method: "POST",
@@ -25,6 +30,7 @@ export async function callTool<T = unknown>(
       method: "tools/call",
       params: { name, arguments: args },
     }),
+    signal: options?.signal,
   });
 
   if (!res.ok) {

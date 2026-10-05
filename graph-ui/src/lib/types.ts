@@ -71,6 +71,10 @@ export interface Project {
   name: string;
   root_path: string;
   indexed_at: string;
+  branch?: string;
+  nodes?: number;
+  edges?: number;
+  size_bytes?: number;
 }
 
 export interface SchemaInfo {

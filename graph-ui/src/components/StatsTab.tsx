@@ -506,8 +506,8 @@ export function StatsTab({ onSelectProject }: StatsTabProps) {
   const aggregate = useMemo(() => {
     let totalNodes = 0, totalEdges = 0;
     for (const p of projects) {
-      totalNodes += p.schema?.node_labels?.reduce((s, l) => s + l.count, 0) ?? 0;
-      totalEdges += p.schema?.edge_types?.reduce((s, t) => s + t.count, 0) ?? 0;
+      totalNodes += p.schema?.node_labels?.reduce((s, l) => s + l.count, 0) ?? p.project.nodes ?? 0;
+      totalEdges += p.schema?.edge_types?.reduce((s, t) => s + t.count, 0) ?? p.project.edges ?? 0;
     }
     return { projects: projects.length, nodes: totalNodes, edges: totalEdges };
   }, [projects]);
@@ -556,8 +556,8 @@ export function StatsTab({ onSelectProject }: StatsTabProps) {
 
         <div className="space-y-3">
           {projects.map((p) => {
-            const totalNodes = p.schema?.node_labels?.reduce((s, l) => s + l.count, 0) ?? 0;
-            const totalEdges = p.schema?.edge_types?.reduce((s, t) => s + t.count, 0) ?? 0;
+            const totalNodes = p.schema?.node_labels?.reduce((s, l) => s + l.count, 0) ?? p.project.nodes ?? 0;
+            const totalEdges = p.schema?.edge_types?.reduce((s, t) => s + t.count, 0) ?? p.project.edges ?? 0;
             return (
               <div key={p.project.name} className="rounded-xl border border-border/30 bg-white/[0.02] hover:bg-white/[0.035] transition-all p-5">
                 <div className="flex items-start justify-between gap-3 mb-3">

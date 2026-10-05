@@ -64,23 +64,50 @@ describe("useProjects machine-readable pagination", () => {
     expect(result.current.projects[0].schema?.edge_types).toEqual([
       { type: "CALLS", count: 2 },
     ]);
-    expect(callToolMock).toHaveBeenCalledWith("list_projects", {
-      format: "json",
-      detail: "stats",
-      limit: 500,
-      offset: 0,
+    expect(callToolMock).toHaveBeenCalledWith(
+      "list_projects",
+      {
+        format: "json",
+        detail: "stats",
+        limit: 500,
+        offset: 0,
+      },
+      expect.objectContaining({ signal: expect.anything() }),
+    );
+    expect(callToolMock).toHaveBeenCalledWith(
+      "list_projects",
+      {
+        format: "json",
+        detail: "stats",
+        limit: 500,
+        offset: 1,
+      },
+      expect.objectContaining({ signal: expect.anything() }),
+    );
+    expect(callToolMock).toHaveBeenCalledWith(
+      "get_graph_schema",
+      {
+        project: "alpha",
+        format: "json",
+        limit: 500,
+        offset: 1,
+      },
+      expect.objectContaining({ signal: expect.anything() }),
+    );
+  });
+
+  it("aborts in-flight request when component unmounts", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    callToolMock.mockImplementation((_name, _args, options) => {
+      capturedSignal = options?.signal;
+      return new Promise((resolve) => setTimeout(() => resolve({ projects: [] }), 100));
     });
-    expect(callToolMock).toHaveBeenCalledWith("list_projects", {
-      format: "json",
-      detail: "stats",
-      limit: 500,
-      offset: 1,
-    });
-    expect(callToolMock).toHaveBeenCalledWith("get_graph_schema", {
-      project: "alpha",
-      format: "json",
-      limit: 500,
-      offset: 1,
-    });
+
+    const { unmount } = renderHook(() => useProjects());
+    expect(capturedSignal).toBeDefined();
+    expect(capturedSignal?.aborted).toBe(false);
+
+    unmount();
+    expect(capturedSignal?.aborted).toBe(true);
   });
 });

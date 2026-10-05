@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { GraphData } from "../lib/types";
 
 export interface LoadProgress {
@@ -45,10 +45,11 @@ export async function fetchLayout(
   maxNodes = GRAPH_RENDER_NODE_LIMIT,
   onProgress?: (progress: LoadProgress) => void,
   graph: GraphVariant = "code",
+  signal?: AbortSignal,
 ): Promise<GraphData> {
   const params = new URLSearchParams({ project, max_nodes: String(maxNodes) });
   if (graph === "missed") params.set("graph", "missed");
-  const res = await fetch(`/api/layout?${params}`);
+  const res = await fetch(`/api/layout?${params}`, { signal });
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
@@ -91,19 +92,41 @@ export function useGraphData(): UseGraphDataResult {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<LoadProgress>(NO_PROGRESS);
+  const activeControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      activeControllerRef.current?.abort();
+    };
+  }, []);
 
   const fetchOverview = useCallback(
     async (project: string, maxNodes?: number, graph: GraphVariant = "code") => {
+      activeControllerRef.current?.abort();
+      const controller = new AbortController();
+      activeControllerRef.current = controller;
+
       setLoading(true);
       setError(null);
       setProgress(NO_PROGRESS);
       try {
-        const result = await fetchLayout(project, maxNodes, setProgress, graph);
-        setData(result);
+        const result = await fetchLayout(project, maxNodes, setProgress, graph, controller.signal);
+        if (!controller.signal.aborted) {
+          setData(result);
+        }
       } catch (e) {
+        if (
+          controller.signal.aborted ||
+          (e instanceof DOMException && e.name === "AbortError") ||
+          (e instanceof Error && e.name === "AbortError")
+        ) {
+          return;
+        }
         setError(e instanceof Error ? e.message : "Failed to fetch layout");
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
       }
     },
     [],
@@ -111,17 +134,32 @@ export function useGraphData(): UseGraphDataResult {
 
   const fetchDetail = useCallback(
     async (project: string, _centerNode: string) => {
+      activeControllerRef.current?.abort();
+      const controller = new AbortController();
+      activeControllerRef.current = controller;
+
       setLoading(true);
       setError(null);
       setProgress(NO_PROGRESS);
       try {
         /* TODO: detail level with center_node filtering */
-        const result = await fetchLayout(project, undefined, setProgress);
-        setData(result);
+        const result = await fetchLayout(project, undefined, setProgress, "code", controller.signal);
+        if (!controller.signal.aborted) {
+          setData(result);
+        }
       } catch (e) {
+        if (
+          controller.signal.aborted ||
+          (e instanceof DOMException && e.name === "AbortError") ||
+          (e instanceof Error && e.name === "AbortError")
+        ) {
+          return;
+        }
         setError(e instanceof Error ? e.message : "Failed to fetch layout");
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
       }
     },
     [],
