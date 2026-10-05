@@ -12202,4 +12202,255 @@ int cbm_store_get_coupled_files(cbm_store_t *s, const char *project, const char 
     return CBM_STORE_OK;
 }
 
+/* ── Environment variable & configuration topology (RFC 006) ────── */
+
+void cbm_store_get_env_vars_result_free(cbm_get_env_vars_result_t *res) {
+    if (!res) return;
+    free(res->project);
+    free(res->env_example_template);
+    if (res->env_vars) {
+        for (int i = 0; i < res->env_vars_count; i++) {
+            cbm_env_var_item_t *item = &res->env_vars[i];
+            free(item->name);
+            free(item->detected_default);
+            free(item->description);
+            if (item->access_methods) {
+                for (int j = 0; j < item->access_methods_count; j++) {
+                    free(item->access_methods[j]);
+                }
+                free(item->access_methods);
+            }
+            if (item->consumers) {
+                for (int j = 0; j < item->consumers_count; j++) {
+                    free(item->consumers[j].symbol);
+                    free(item->consumers[j].file_path);
+                }
+                free(item->consumers);
+            }
+        }
+        free(res->env_vars);
+    }
+    free(res);
+}
+
+int cbm_store_get_env_vars(cbm_store_t *s, const char *project,
+                           const cbm_get_env_vars_opts_t *opts,
+                           cbm_get_env_vars_result_t **out) {
+    if (!out) {
+        return CBM_STORE_ERR;
+    }
+    *out = NULL;
+    if (!s || !s->db || !project || project[0] == '\0') {
+        return CBM_STORE_ERR;
+    }
+
+    cbm_get_env_vars_result_t *res = calloc(1, sizeof(*res));
+    if (!res) {
+        return CBM_STORE_ERR;
+    }
+    res->project = strdup(project);
+
+    char pattern_buf[CBM_SZ_512] = "";
+    bool has_pattern = false;
+    if (opts && opts->name_pattern && opts->name_pattern[0] != '\0') {
+        has_pattern = true;
+        const char *p = opts->name_pattern;
+        bool has_wildcard = (strchr(p, '*') != NULL || strchr(p, '?') != NULL || strchr(p, '%') != NULL);
+        if (has_wildcard) {
+            size_t j = 0;
+            for (size_t i = 0; p[i] != '\0' && j < sizeof(pattern_buf) - 1; i++) {
+                if (p[i] == '*') pattern_buf[j++] = '%';
+                else if (p[i] == '?') pattern_buf[j++] = '_';
+                else pattern_buf[j++] = p[i];
+            }
+            pattern_buf[j] = '\0';
+        } else {
+            snprintf(pattern_buf, sizeof(pattern_buf), "%%%s%%", p);
+        }
+    }
+
+    const char *sql =
+        "SELECT "
+        "  v.id AS env_id, "
+        "  v.name AS var_name, "
+        "  json_extract(v.properties, '$.default_value') AS default_val, "
+        "  coalesce(cast(json_extract(v.properties, '$.is_required') AS INTEGER), 0) AS is_required, "
+        "  json_extract(v.properties, '$.description') AS description, "
+        "  f.qualified_name AS consumer_qn, "
+        "  f.name AS consumer_name, "
+        "  f.file_path AS consumer_file, "
+        "  coalesce(cast(json_extract(e.properties, '$.read_line') AS INTEGER), f.start_line, 0) AS consumer_line, "
+        "  coalesce(json_extract(e.properties, '$.access_method'), json_extract(e.properties, '$.strategy'), 'getenv') AS access_method "
+        "FROM nodes v "
+        "LEFT JOIN edges e ON (e.type = 'CONFIGURES' AND (e.source_id = v.id OR e.target_id = v.id)) "
+        "LEFT JOIN nodes f ON (f.id = CASE WHEN e.source_id = v.id THEN e.target_id ELSE e.source_id END) "
+        "WHERE v.project = ?1 "
+        "  AND v.label = 'EnvVar' "
+        "  AND (?2 IS NULL OR v.name LIKE ?2) "
+        "ORDER BY v.name ASC, v.id ASC, f.file_path ASC, consumer_line ASC;";
+
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(s->db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        cbm_store_get_env_vars_result_free(res);
+        return CBM_STORE_ERR;
+    }
+
+    sqlite3_bind_text(stmt, 1, project, -1, SQLITE_STATIC);
+    if (has_pattern) {
+        sqlite3_bind_text(stmt, 2, pattern_buf, -1, SQLITE_TRANSIENT);
+    } else {
+        sqlite3_bind_null(stmt, 2);
+    }
+
+    int env_cap = 16;
+    res->env_vars = calloc((size_t)env_cap, sizeof(cbm_env_var_item_t));
+    if (!res->env_vars) {
+        sqlite3_finalize(stmt);
+        cbm_store_get_env_vars_result_free(res);
+        return CBM_STORE_ERR;
+    }
+
+    int64_t current_env_id = -1;
+    cbm_env_var_item_t *current_item = NULL;
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        int64_t env_id = sqlite3_column_int64(stmt, 0);
+        if (env_id != current_env_id) {
+            if (res->env_vars_count >= env_cap) {
+                int next_cap = env_cap * 2;
+                cbm_env_var_item_t *grown = realloc(res->env_vars, (size_t)next_cap * sizeof(cbm_env_var_item_t));
+                if (grown) {
+                    res->env_vars = grown;
+                    env_cap = next_cap;
+                }
+            }
+
+            if (res->env_vars_count < env_cap) {
+                current_item = &res->env_vars[res->env_vars_count++];
+                memset(current_item, 0, sizeof(*current_item));
+                current_env_id = env_id;
+
+                const char *vname = (const char *)sqlite3_column_text(stmt, 1);
+                current_item->name = strdup(vname ? vname : "");
+
+                const char *def_val = (const char *)sqlite3_column_text(stmt, 2);
+                if (def_val) {
+                    current_item->detected_default = strdup(def_val);
+                }
+
+                int is_req = sqlite3_column_int(stmt, 3);
+                current_item->is_required = (is_req != 0);
+
+                const char *desc = (const char *)sqlite3_column_text(stmt, 4);
+                if (desc && desc[0] != '\0') {
+                    current_item->description = strdup(desc);
+                } else {
+                    char desc_buf[CBM_SZ_256];
+                    snprintf(desc_buf, sizeof(desc_buf), "Environment configuration variable %s", current_item->name ? current_item->name : "");
+                    current_item->description = strdup(desc_buf);
+                }
+            } else {
+                current_item = NULL;
+            }
+        }
+
+        if (current_item) {
+            const char *c_qn = (const char *)sqlite3_column_text(stmt, 5);
+            const char *c_name = (const char *)sqlite3_column_text(stmt, 6);
+            const char *c_file = (const char *)sqlite3_column_text(stmt, 7);
+            int c_line = sqlite3_column_int(stmt, 8);
+            const char *acc_method = (const char *)sqlite3_column_text(stmt, 9);
+
+            if (c_qn || c_name || c_file) {
+                const char *sym = c_qn ? c_qn : (c_name ? c_name : "");
+                const char *fpath = c_file ? c_file : "";
+
+                bool duplicate_consumer = false;
+                for (int i = 0; i < current_item->consumers_count; i++) {
+                    if (strcmp(current_item->consumers[i].symbol, sym) == 0 &&
+                        strcmp(current_item->consumers[i].file_path, fpath) == 0 &&
+                        current_item->consumers[i].line == c_line) {
+                        duplicate_consumer = true;
+                        break;
+                    }
+                }
+
+                if (!duplicate_consumer) {
+                    int nc = current_item->consumers_count + 1;
+                    cbm_env_var_consumer_t *cg = realloc(current_item->consumers, (size_t)nc * sizeof(cbm_env_var_consumer_t));
+                    if (cg) {
+                        current_item->consumers = cg;
+                        current_item->consumers[current_item->consumers_count].symbol = strdup(sym);
+                        current_item->consumers[current_item->consumers_count].file_path = strdup(fpath);
+                        current_item->consumers[current_item->consumers_count].line = c_line;
+                        current_item->consumers_count++;
+                    }
+                }
+            }
+
+            if (acc_method && acc_method[0] != '\0') {
+                bool duplicate_method = false;
+                for (int i = 0; i < current_item->access_methods_count; i++) {
+                    if (strcmp(current_item->access_methods[i], acc_method) == 0) {
+                        duplicate_method = true;
+                        break;
+                    }
+                }
+                if (!duplicate_method) {
+                    int nm = current_item->access_methods_count + 1;
+                    char **mg = realloc(current_item->access_methods, (size_t)nm * sizeof(char *));
+                    if (mg) {
+                        current_item->access_methods = mg;
+                        current_item->access_methods[current_item->access_methods_count++] = strdup(acc_method);
+                    }
+                }
+            }
+        }
+    }
+    sqlite3_finalize(stmt);
+
+    for (int i = 0; i < res->env_vars_count; i++) {
+        cbm_env_var_item_t *item = &res->env_vars[i];
+        if (item->access_methods_count == 0) {
+            item->access_methods = calloc(1, sizeof(char *));
+            if (item->access_methods) {
+                item->access_methods[0] = strdup("getenv");
+                item->access_methods_count = 1;
+            }
+        }
+    }
+
+    res->total_env_vars = res->env_vars_count;
+
+    if (opts && opts->generate_env_example) {
+        size_t est_len = 64;
+        for (int i = 0; i < res->env_vars_count; i++) {
+            est_len += strlen(res->env_vars[i].name) +
+                       (res->env_vars[i].detected_default ? strlen(res->env_vars[i].detected_default) : 0) + 32;
+        }
+        char *tpl = malloc(est_len + 1);
+        if (tpl) {
+            tpl[0] = '\0';
+            strcat(tpl, "# Generated by Codebase Memory\n");
+            for (int i = 0; i < res->env_vars_count; i++) {
+                cbm_env_var_item_t *item = &res->env_vars[i];
+                char line[CBM_SZ_1K];
+                if (item->detected_default && item->detected_default[0] != '\0') {
+                    snprintf(line, sizeof(line), "%s=%s\n", item->name, item->detected_default);
+                } else if (item->is_required) {
+                    snprintf(line, sizeof(line), "%s= # Required\n", item->name);
+                } else {
+                    snprintf(line, sizeof(line), "%s=\n", item->name);
+                }
+                strcat(tpl, line);
+            }
+            res->env_example_template = tpl;
+        }
+    }
+
+    *out = res;
+    return CBM_STORE_OK;
+}
+
+
 

@@ -1373,8 +1373,8 @@ TEST(mcp_metadata_byte_budget) {
     /* 15 KiB covered the lean surface at the branch point; get_file_outline,
      * compare_graphs, manage_adr set_sections, and the search_code debug and
      * list_projects include_details parameters landed on main since.
-     * get_api_surface added in RFC 002. */
-    ASSERT_LT((int)strlen(json), 25 * 1024);
+     * RFCs 001 - 006 added analytical tools to the catalog. */
+    ASSERT_LT((int)strlen(json), 30 * 1024);
 
     yyjson_doc *doc = yyjson_read(json, strlen(json), 0);
     ASSERT_NOT_NULL(doc);
@@ -1436,6 +1436,7 @@ TEST(mcp_tools_have_behavior_annotations) {
         {"audit_test_coverage", true, false, true, false},
         {"find_code_clones", true, false, true, false},
         {"get_coupled_files", true, false, true, false},
+        {"get_env_vars", true, false, true, false},
     };
 
     char *json = cbm_mcp_tools_list();
@@ -23188,6 +23189,232 @@ TEST(tool_coupled_files_not_found) {
     PASS();
 }
 
+TEST(tool_get_env_vars_catalog) {
+    const char *project = "test-env-catalog";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-env-catalog"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    /* 1. EnvVar 1: CBM_DB_PATH */
+    cbm_node_t v1 = {0};
+    v1.project = project;
+    v1.label = "EnvVar";
+    v1.name = "CBM_DB_PATH";
+    v1.qualified_name = "__env__CBM_DB_PATH";
+    v1.properties_json = "{\"default_value\":\"~/.codebase-memory/data.db\",\"is_required\":false,\"description\":\"Path to primary SQLite file\"}";
+    ASSERT_GT(cbm_store_upsert_node(st, &v1), 0);
+
+    /* 2. EnvVar 2: CBM_LOG_LEVEL */
+    cbm_node_t v2 = {0};
+    v2.project = project;
+    v2.label = "EnvVar";
+    v2.name = "CBM_LOG_LEVEL";
+    v2.qualified_name = "__env__CBM_LOG_LEVEL";
+    v2.properties_json = "{\"default_value\":\"INFO\",\"is_required\":false}";
+    ASSERT_GT(cbm_store_upsert_node(st, &v2), 0);
+
+    char *resp = cbm_mcp_handle_tool(
+        srv, "get_env_vars",
+        "{\"project\":\"test-env-catalog\"}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NULL(strstr(resp, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "\"total_env_vars\":2"));
+    ASSERT_NOT_NULL(strstr(resp, "\"name\":\"CBM_DB_PATH\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"detected_default\":\"~/.codebase-memory/data.db\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"description\":\"Path to primary SQLite file\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"name\":\"CBM_LOG_LEVEL\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"detected_default\":\"INFO\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"access_methods\":[\"getenv\"]"));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_get_env_vars_consumers) {
+    const char *project = "test-env-consumers";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-env-consumers"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    /* EnvVar: PORT */
+    cbm_node_t v = {0};
+    v.project = project;
+    v.label = "EnvVar";
+    v.name = "PORT";
+    v.qualified_name = "__env__PORT";
+    v.properties_json = "{\"is_required\":true}";
+    int64_t vid = cbm_store_upsert_node(st, &v);
+    ASSERT_GT(vid, 0);
+
+    /* Consumer 1: start_server */
+    cbm_node_t c1 = {0};
+    c1.project = project;
+    c1.label = "Function";
+    c1.name = "start_server";
+    c1.qualified_name = "src.server.start_server";
+    c1.file_path = "src/server.c";
+    c1.start_line = 100;
+    c1.end_line = 120;
+    int64_t c1_id = cbm_store_upsert_node(st, &c1);
+    ASSERT_GT(c1_id, 0);
+
+    /* Consumer 2: init_config */
+    cbm_node_t c2 = {0};
+    c2.project = project;
+    c2.label = "Function";
+    c2.name = "init_config";
+    c2.qualified_name = "src.config.init_config";
+    c2.file_path = "src/config.c";
+    c2.start_line = 50;
+    c2.end_line = 70;
+    int64_t c2_id = cbm_store_upsert_node(st, &c2);
+    ASSERT_GT(c2_id, 0);
+
+    /* Edge 1: PORT -> start_server (v -> c1) */
+    cbm_edge_t e1 = {0};
+    e1.project = project;
+    e1.source_id = vid;
+    e1.target_id = c1_id;
+    e1.type = "CONFIGURES";
+    e1.properties_json = "{\"access_method\":\"getenv\",\"read_line\":105}";
+    ASSERT_GT(cbm_store_insert_edge(st, &e1), 0);
+
+    /* Edge 2: init_config -> PORT (c2 -> v) */
+    cbm_edge_t e2 = {0};
+    e2.project = project;
+    e2.source_id = c2_id;
+    e2.target_id = vid;
+    e2.type = "CONFIGURES";
+    e2.properties_json = "{\"access_method\":\"process.env\",\"read_line\":55}";
+    ASSERT_GT(cbm_store_insert_edge(st, &e2), 0);
+
+    char *resp = cbm_mcp_handle_tool(
+        srv, "get_env_vars",
+        "{\"project\":\"test-env-consumers\",\"include_consumers\":true}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NULL(strstr(resp, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "\"is_required\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "\"consumers_count\":2"));
+    ASSERT_NOT_NULL(strstr(resp, "\"symbol\":\"src.server.start_server\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"file_path\":\"src/server.c\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"line\":105"));
+    ASSERT_NOT_NULL(strstr(resp, "\"symbol\":\"src.config.init_config\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"file_path\":\"src/config.c\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"line\":55"));
+    ASSERT_NOT_NULL(strstr(resp, "getenv"));
+    ASSERT_NOT_NULL(strstr(resp, "process.env"));
+    free(resp);
+
+    /* Query with include_consumers = false */
+    char *resp_no_consumers = cbm_mcp_handle_tool(
+        srv, "get_env_vars",
+        "{\"project\":\"test-env-consumers\",\"include_consumers\":false}");
+    ASSERT_NOT_NULL(resp_no_consumers);
+    ASSERT_NOT_NULL(strstr(resp_no_consumers, "\"consumers_count\":2"));
+    ASSERT_NULL(strstr(resp_no_consumers, "\"consumers\":["));
+    free(resp_no_consumers);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_get_env_vars_filtering) {
+    const char *project = "test-env-filtering";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-env-filtering"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    cbm_node_t v1 = {.project = project, .label = "EnvVar", .name = "DB_URL", .qualified_name = "__env__DB_URL"};
+    cbm_node_t v2 = {.project = project, .label = "EnvVar", .name = "DB_PORT", .qualified_name = "__env__DB_PORT"};
+    cbm_node_t v3 = {.project = project, .label = "EnvVar", .name = "API_KEY", .qualified_name = "__env__API_KEY"};
+    cbm_node_t v4 = {.project = project, .label = "EnvVar", .name = "CACHE_TTL", .qualified_name = "__env__CACHE_TTL"};
+    ASSERT_GT(cbm_store_upsert_node(st, &v1), 0);
+    ASSERT_GT(cbm_store_upsert_node(st, &v2), 0);
+    ASSERT_GT(cbm_store_upsert_node(st, &v3), 0);
+    ASSERT_GT(cbm_store_upsert_node(st, &v4), 0);
+
+    /* Wildcard filter: DB_* */
+    char *resp_db = cbm_mcp_handle_tool(
+        srv, "get_env_vars",
+        "{\"project\":\"test-env-filtering\",\"name_pattern\":\"DB_*\"}");
+    ASSERT_NOT_NULL(resp_db);
+    ASSERT_NOT_NULL(strstr(resp_db, "\"total_env_vars\":2"));
+    ASSERT_NOT_NULL(strstr(resp_db, "\"name\":\"DB_URL\""));
+    ASSERT_NOT_NULL(strstr(resp_db, "\"name\":\"DB_PORT\""));
+    ASSERT_NULL(strstr(resp_db, "\"name\":\"API_KEY\""));
+    ASSERT_NULL(strstr(resp_db, "\"name\":\"CACHE_TTL\""));
+    free(resp_db);
+
+    /* Substring filter: KEY */
+    char *resp_key = cbm_mcp_handle_tool(
+        srv, "get_env_vars",
+        "{\"project\":\"test-env-filtering\",\"name_pattern\":\"KEY\"}");
+    ASSERT_NOT_NULL(resp_key);
+    ASSERT_NOT_NULL(strstr(resp_key, "\"total_env_vars\":1"));
+    ASSERT_NOT_NULL(strstr(resp_key, "\"name\":\"API_KEY\""));
+    ASSERT_NULL(strstr(resp_key, "\"name\":\"DB_URL\""));
+    free(resp_key);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_get_env_vars_generate_example) {
+    const char *project = "test-env-example";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-env-example"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    cbm_node_t v1 = {0};
+    v1.project = project;
+    v1.label = "EnvVar";
+    v1.name = "DB_HOST";
+    v1.qualified_name = "__env__DB_HOST";
+    v1.properties_json = "{\"default_value\":\"localhost\"}";
+    ASSERT_GT(cbm_store_upsert_node(st, &v1), 0);
+
+    cbm_node_t v2 = {0};
+    v2.project = project;
+    v2.label = "EnvVar";
+    v2.name = "SECRET_KEY";
+    v2.qualified_name = "__env__SECRET_KEY";
+    v2.properties_json = "{\"is_required\":true}";
+    ASSERT_GT(cbm_store_upsert_node(st, &v2), 0);
+
+    char *resp_with_example = cbm_mcp_handle_tool(
+        srv, "get_env_vars",
+        "{\"project\":\"test-env-example\",\"generate_env_example\":true}");
+    ASSERT_NOT_NULL(resp_with_example);
+    ASSERT_NOT_NULL(strstr(resp_with_example, "\"env_example_template\""));
+    ASSERT_NOT_NULL(strstr(resp_with_example, "# Generated by Codebase Memory"));
+    ASSERT_NOT_NULL(strstr(resp_with_example, "DB_HOST=localhost"));
+    ASSERT_NOT_NULL(strstr(resp_with_example, "SECRET_KEY= # Required"));
+    free(resp_with_example);
+
+    char *resp_without_example = cbm_mcp_handle_tool(
+        srv, "get_env_vars",
+        "{\"project\":\"test-env-example\",\"generate_env_example\":false}");
+    ASSERT_NOT_NULL(resp_without_example);
+    ASSERT_NULL(strstr(resp_without_example, "\"env_example_template\""));
+    free(resp_without_example);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
 TEST(tool_trace_cursor_truncated_after_leg_is_rejected) {
     cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
     ASSERT_NOT_NULL(srv);
@@ -23279,6 +23506,10 @@ SUITE(mcp) {
     RUN_TEST(tool_coupled_files_bidirectional);
     RUN_TEST(tool_coupled_files_confidence_filtering);
     RUN_TEST(tool_coupled_files_not_found);
+    RUN_TEST(tool_get_env_vars_catalog);
+    RUN_TEST(tool_get_env_vars_consumers);
+    RUN_TEST(tool_get_env_vars_filtering);
+    RUN_TEST(tool_get_env_vars_generate_example);
     RUN_TEST(index_repository_async_and_status_refused_without_daemon_issue2144);
     RUN_TEST(index_repository_schema_documents_async_polling_issue2144);
     RUN_TEST(tool_result_add_notice_keeps_payload_shape_issue2144);

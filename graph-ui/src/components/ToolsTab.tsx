@@ -301,6 +301,35 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     ),
   },
   {
+    name: "get_env_vars",
+    category: "Tracing & Architecture",
+    summary: "Inspect environment variable and configuration topology",
+    description:
+      "Returns the environment variables and configuration parameters used by the project, including where they are read in code, detected fallback defaults, and consuming modules.",
+    readOnly: true,
+    idempotent: true,
+    parameters: [
+      { name: "project", type: "string", required: true, description: "Target project identifier registered in Codebase Memory" },
+      { name: "name_pattern", type: "string", required: false, description: "Optional substring or regex to filter variable names (e.g. 'DB_*' or 'PORT')" },
+      { name: "include_consumers", type: "boolean", required: false, defaultVal: true, description: "Include the list of functions and files that consume each environment variable" },
+      { name: "generate_env_example", type: "boolean", required: false, defaultVal: false, description: "If true, generates a ready-to-use .env.example template string" },
+    ],
+    cliExample: "cbm cli get_env_vars --project={PROJECT}",
+    jsonExample: JSON.stringify(
+      {
+        name: "get_env_vars",
+        arguments: {
+          project: "{PROJECT}",
+          name_pattern: "DB_*",
+          include_consumers: true,
+          generate_env_example: false,
+        },
+      },
+      null,
+      2
+    ),
+  },
+  {
     name: "get_code_snippet",
     category: "Code Discovery",
     summary: "Fetch precise source code for a symbol, function, or line range",
