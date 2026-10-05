@@ -12452,5 +12452,275 @@ int cbm_store_get_env_vars(cbm_store_t *s, const char *project,
     return CBM_STORE_OK;
 }
 
+/* ── Dead code auditor (RFC 007) ─────────────────────────────────── */
+
+void cbm_store_find_dead_code_result_free(cbm_find_dead_code_result_t *res) {
+    if (!res) return;
+    free(res->project);
+    free(res->action_prompt);
+    if (res->dead_symbols) {
+        for (int i = 0; i < res->dead_symbols_count; i++) {
+            cbm_dead_code_item_t *item = &res->dead_symbols[i];
+            free(item->name);
+            free(item->qualified_name);
+            free(item->label);
+            free(item->file_path);
+            free(item->confidence);
+            free(item->rationale);
+        }
+        free(res->dead_symbols);
+    }
+    free(res);
+}
+
+int cbm_store_find_dead_code(cbm_store_t *s, const char *project,
+                             const cbm_find_dead_code_opts_t *opts,
+                             cbm_find_dead_code_result_t **out) {
+    if (!out) return CBM_STORE_ERR;
+    *out = NULL;
+    if (!s || !s->db || !project || project[0] == '\0') {
+        return CBM_STORE_ERR;
+    }
+
+    cbm_find_dead_code_result_t *res = calloc(1, sizeof(*res));
+    if (!res) return CBM_STORE_ERR;
+    res->project = strdup(project);
+    res->action_prompt = strdup("Run 'git rm' or delete the verified HIGH-confidence symbols during refactoring.");
+
+    const char *label_filter = (opts && opts->label && opts->label[0] != '\0') ? opts->label : "ALL";
+    const char *min_conf = (opts && opts->min_confidence && opts->min_confidence[0] != '\0') ? opts->min_confidence : "HIGH";
+    bool exclude_exported = opts ? opts->exclude_exported : true;
+    int limit = (opts && opts->limit > 0) ? opts->limit : 30;
+    if (limit > 100) limit = 100;
+
+    int min_conf_level = 3; /* 3 = HIGH, 2 = MEDIUM, 1 = LOW */
+    if (api_strcasecmp(min_conf, "LOW") == 0) min_conf_level = 1;
+    else if (api_strcasecmp(min_conf, "MEDIUM") == 0) min_conf_level = 2;
+    else min_conf_level = 3;
+
+    char file_filter[CBM_SZ_512] = "";
+    bool has_file_filter = false;
+    if (opts && opts->file_path && opts->file_path[0] != '\0') {
+        has_file_filter = true;
+        strncpy(file_filter, opts->file_path, sizeof(file_filter) - 1);
+        file_filter[sizeof(file_filter) - 1] = '\0';
+        for (char *p = file_filter; *p; p++) {
+            if (*p == '\\') *p = '/';
+        }
+    }
+
+    const char *sql =
+        "SELECT "
+        "  n.id, "
+        "  n.name, "
+        "  n.qualified_name, "
+        "  n.label, "
+        "  n.file_path, "
+        "  coalesce(n.start_line, 1) AS start_line, "
+        "  coalesce(n.end_line, coalesce(n.start_line, 1)) AS end_line, "
+        "  max(1, coalesce(n.end_line, coalesce(n.start_line, 1)) - coalesce(n.start_line, 1) + 1) AS line_count, "
+        "  n.properties, "
+        "  ("
+        "    (n.properties LIKE '%\"is_exported\":true%' OR json_extract(n.properties, '$.is_exported') = 1 OR json_extract(n.properties, '$.is_exported') = 'true') "
+        "    OR EXISTS ("
+        "      SELECT 1 FROM lsp_surface l "
+        "      WHERE l.project = ?1 "
+        "        AND l.rel_path = n.file_path "
+        "        AND instr(l.defs_json, '\"' || n.name || '\"') > 0"
+        "    )"
+        "  ) AS is_exported "
+        "FROM nodes n "
+        "WHERE n.project = ?1 "
+        "  AND (?2 IS NULL OR n.file_path = ?2 OR n.file_path LIKE ?2 || '/%' OR n.file_path LIKE ?2 || '%') "
+        "  AND (?3 IS NULL OR ?3 = 'ALL' OR n.label = ?3) "
+        "  AND n.label IN ('Function', 'Class', 'Variable', 'Method') "
+        "  /* Exclude tests */ "
+        "  AND (json_extract(n.properties, '$.is_test') IS NULL "
+        "       OR (json_extract(n.properties, '$.is_test') != 1 AND json_extract(n.properties, '$.is_test') != 'true')) "
+        "  AND (n.file_path IS NULL OR (n.file_path NOT LIKE 'tests/%' AND n.file_path NOT LIKE '%/tests/%' AND n.file_path NOT LIKE '%.test.%' AND n.file_path NOT LIKE '%.spec.%')) "
+        "  /* Exclude entry points (main, CLI entry points) */ "
+        "  AND n.name != 'main' "
+        "  AND (n.qualified_name IS NULL OR n.qualified_name NOT LIKE '%.main') "
+        "  AND (json_extract(n.properties, '$.is_entry_point') IS NULL "
+        "       OR (json_extract(n.properties, '$.is_entry_point') != 1 AND json_extract(n.properties, '$.is_entry_point') != 'true')) "
+        "  /* Must have ZERO incoming CALLS, USAGE, HTTP_CALLS, HANDLES */ "
+        "  AND NOT EXISTS ("
+        "    SELECT 1 FROM edges e "
+        "    WHERE e.project = ?1 "
+        "      AND e.target_id = n.id "
+        "      AND e.type IN ('CALLS', 'USAGE', 'HTTP_CALLS', 'HANDLES') "
+        "  ) "
+        "  /* Exclude controller functions linked to Route nodes (HANDLES or Route neighbors) */ "
+        "  AND NOT EXISTS ("
+        "    SELECT 1 FROM edges e "
+        "    JOIN nodes r ON (r.id = CASE WHEN e.source_id = n.id THEN e.target_id ELSE e.source_id END) "
+        "    WHERE e.project = ?1 "
+        "      AND (e.source_id = n.id OR e.target_id = n.id) "
+        "      AND (e.type = 'HANDLES' OR r.label = 'Route') "
+        "  ) "
+        "  /* Exclude public LSP export surface if requested */ "
+        "  AND (?4 = 0 OR ("
+        "    (json_extract(n.properties, '$.is_exported') IS NULL "
+        "     OR (json_extract(n.properties, '$.is_exported') != 1 AND json_extract(n.properties, '$.is_exported') != 'true')) "
+        "    AND NOT EXISTS ("
+        "      SELECT 1 FROM lsp_surface l "
+        "      WHERE l.project = ?1 "
+        "        AND l.rel_path = n.file_path "
+        "        AND instr(l.defs_json, '\"' || n.name || '\"') > 0 "
+        "    )"
+        "  )) "
+        "ORDER BY line_count DESC, n.name ASC;";
+
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(s->db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        cbm_store_find_dead_code_result_free(res);
+        return CBM_STORE_ERR;
+    }
+
+    sqlite3_bind_text(stmt, 1, project, -1, SQLITE_STATIC);
+    if (has_file_filter) {
+        sqlite3_bind_text(stmt, 2, file_filter, -1, SQLITE_TRANSIENT);
+    } else {
+        sqlite3_bind_null(stmt, 2);
+    }
+    sqlite3_bind_text(stmt, 3, label_filter, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 4, exclude_exported ? 1 : 0);
+
+    int cap = 16;
+    res->dead_symbols = calloc((size_t)cap, sizeof(cbm_dead_code_item_t));
+    if (!res->dead_symbols) {
+        sqlite3_finalize(stmt);
+        cbm_store_find_dead_code_result_free(res);
+        return CBM_STORE_ERR;
+    }
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const char *name = (const char *)sqlite3_column_text(stmt, 1);
+        const char *qn = (const char *)sqlite3_column_text(stmt, 2);
+        const char *lbl = (const char *)sqlite3_column_text(stmt, 3);
+        const char *fpath = (const char *)sqlite3_column_text(stmt, 4);
+        int start_line = sqlite3_column_int(stmt, 5);
+        int end_line = sqlite3_column_int(stmt, 6);
+        int line_count = sqlite3_column_int(stmt, 7);
+        const char *props = (const char *)sqlite3_column_text(stmt, 8);
+        int is_exp_int = sqlite3_column_int(stmt, 9);
+        bool is_exported = (is_exp_int != 0);
+
+        bool is_static = false;
+        bool is_private = false;
+        if (props && props[0] != '\0') {
+            if (strstr(props, "\"is_static\":true") || strstr(props, "\"is_static\":1")) is_static = true;
+            if (strstr(props, "\"is_private\":true") || strstr(props, "\"is_private\":1") || strstr(props, "\"visibility\":\"private\"")) is_private = true;
+        }
+
+        const char *conf_str = "MEDIUM";
+        int conf_level = 2; /* 1: LOW, 2: MEDIUM, 3: HIGH */
+
+        if (is_static || is_private) {
+            conf_str = "HIGH";
+            conf_level = 3;
+        } else if (fpath && (strstr(fpath, ".c") || strstr(fpath, ".cpp") || strstr(fpath, ".h"))) {
+            if (is_static || !is_exported) {
+                conf_str = "HIGH";
+                conf_level = 3;
+            }
+        } else if (fpath && (strstr(fpath, ".ts") || strstr(fpath, ".tsx") || strstr(fpath, ".js") || strstr(fpath, ".jsx"))) {
+            if (!is_exported) {
+                conf_str = "HIGH";
+                conf_level = 3;
+            }
+        } else if (!is_exported) {
+            conf_str = "HIGH";
+            conf_level = 3;
+        }
+
+        if (is_exported) {
+            conf_str = "LOW";
+            conf_level = 1;
+        } else if (lbl && (strcmp(lbl, "Method") == 0 || strcmp(lbl, "Class") == 0) && !is_static && !is_private) {
+            conf_str = "MEDIUM";
+            conf_level = 2;
+        }
+
+        if (conf_level == 3) res->confidence_high++;
+        else if (conf_level == 2) res->confidence_medium++;
+        else res->confidence_low++;
+
+        res->total_dead_candidates_found++;
+
+        if (conf_level >= min_conf_level) {
+            res->total_lines_recoverable += line_count;
+
+            if (res->dead_symbols_count < limit) {
+                if (res->dead_symbols_count >= cap) {
+                    int next_cap = cap * 2;
+                    cbm_dead_code_item_t *grown = realloc(res->dead_symbols, (size_t)next_cap * sizeof(cbm_dead_code_item_t));
+                    if (grown) {
+                        res->dead_symbols = grown;
+                        cap = next_cap;
+                    }
+                }
+
+                if (res->dead_symbols_count < cap) {
+                    cbm_dead_code_item_t *item = &res->dead_symbols[res->dead_symbols_count++];
+                    memset(item, 0, sizeof(*item));
+
+                    item->name = strdup(name ? name : "");
+                    item->qualified_name = strdup(qn ? qn : (name ? name : ""));
+                    item->label = strdup(lbl ? lbl : "Function");
+                    item->file_path = strdup(fpath ? fpath : "");
+                    item->start_line = start_line;
+                    item->end_line = end_line;
+                    item->inbound_callers = 0;
+                    item->inbound_usages = 0;
+                    item->is_exported = is_exported;
+                    item->confidence = strdup(conf_str);
+                    item->estimated_lines_saved = line_count;
+
+                    char rationale[CBM_SZ_512] = "";
+                    if (lbl && strcmp(lbl, "Variable") == 0) {
+                        snprintf(rationale, sizeof(rationale),
+                                 "Module-internal constant with no usage in any active source file.");
+                    } else if (fpath && (strstr(fpath, ".c") || strstr(fpath, ".cpp"))) {
+                        if (is_static) {
+                            snprintf(rationale, sizeof(rationale),
+                                     "Static C function with 0 callers and 0 references in the repository.");
+                        } else {
+                            snprintf(rationale, sizeof(rationale),
+                                     "Internal C function with 0 callers in the project.");
+                        }
+                    } else if (fpath && (strstr(fpath, ".ts") || strstr(fpath, ".tsx") || strstr(fpath, ".js") || strstr(fpath, ".jsx"))) {
+                        if (!is_exported) {
+                            snprintf(rationale, sizeof(rationale),
+                                     "Unexported module symbol with 0 callers and 0 usages in the codebase.");
+                        } else {
+                            snprintf(rationale, sizeof(rationale),
+                                     "TypeScript symbol with 0 inbound callers.");
+                        }
+                    } else if (lbl && strcmp(lbl, "Method") == 0) {
+                        snprintf(rationale, sizeof(rationale),
+                                 "Method with 0 inbound callers; verify if called dynamically or via interface.");
+                    } else if (lbl && strcmp(lbl, "Class") == 0) {
+                        snprintf(rationale, sizeof(rationale),
+                                 "Class with 0 instantiations or references in the project.");
+                    } else if (is_exported) {
+                        snprintf(rationale, sizeof(rationale),
+                                 "Exported public symbol with 0 internal callers; may be consumed by external downstream packages.");
+                    } else {
+                        snprintf(rationale, sizeof(rationale),
+                                 "Internal symbol with 0 callers and 0 references in the repository.");
+                    }
+                    item->rationale = strdup(rationale);
+                }
+            }
+        }
+    }
+    sqlite3_finalize(stmt);
+
+    *out = res;
+    return CBM_STORE_OK;
+}
+
+
 
 

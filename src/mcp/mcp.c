@@ -903,6 +903,18 @@ static const tool_def_t TOOLS[] = {
      "\"include_consumers\":{\"type\":\"boolean\",\"default\":true,\"description\":\"Include the list of functions and files that consume each environment variable.\"},"
      "\"generate_env_example\":{\"type\":\"boolean\",\"default\":false,\"description\":\"If true, generates a ready-to-use .env.example template string.\"}"
      "},\"required\":[\"project\"]}"},
+
+    {"find_dead_code",
+     "Audits the codebase for unreferenced functions, classes, and variables with zero inbound callers or usages, "
+     "filtering out public API exports, entry points, and test suites.",
+     "{\"type\":\"object\",\"properties\":{"
+     "\"project\":{\"type\":\"string\",\"description\":\"Target project identifier registered in Codebase Memory.\"},"
+     "\"file_path\":{\"type\":\"string\",\"description\":\"Optional file path or directory prefix to restrict dead code analysis.\"},"
+     "\"label\":{\"type\":\"string\",\"enum\":[\"ALL\",\"Function\",\"Class\",\"Variable\",\"Method\"],\"default\":\"ALL\",\"description\":\"Symbol type filter: Function, Class, Variable, Method, or ALL.\"},"
+     "\"exclude_exported\":{\"type\":\"boolean\",\"default\":true,\"description\":\"Exclude symbols exported across module or library boundaries via lsp_surface.\"},"
+     "\"min_confidence\":{\"type\":\"string\",\"enum\":[\"HIGH\",\"MEDIUM\",\"LOW\"],\"default\":\"HIGH\",\"description\":\"Minimum confidence threshold: HIGH (private/internal with 0 calls), MEDIUM (module-scoped), LOW (all 0-in-degree symbols).\"},"
+     "\"limit\":{\"type\":\"integer\",\"default\":30,\"minimum\":1,\"maximum\":100,\"description\":\"Maximum number of dead symbols to return.\"}"
+     "},\"required\":[\"project\"]}"},
 };
 
 static const int TOOL_COUNT = sizeof(TOOLS) / sizeof(TOOLS[0]);
@@ -940,6 +952,7 @@ static const tool_annotation_def_t TOOL_ANNOTATIONS[] = {
     {"find_code_clones", true, false, true, false},
     {"get_coupled_files", true, false, true, false},
     {"get_env_vars", true, false, true, false},
+    {"find_dead_code", true, false, true, false},
     {"get_code_snippet", true, false, true, false},
     {"get_file_outline", true, false, true, false},
     {"get_graph_schema", true, false, true, false},
@@ -9152,6 +9165,120 @@ static char *handle_get_env_vars(cbm_mcp_server_t *srv, const char *args) {
     cbm_store_get_env_vars_result_free(res);
     free(project);
     free(name_pattern);
+
+    char *mcp_res = cbm_mcp_text_result(json, false);
+    free(json);
+    return mcp_res;
+}
+
+static char *handle_find_dead_code(cbm_mcp_server_t *srv, const char *args) {
+    char *project = get_project_arg(args);
+    cbm_store_t *store = resolve_store(srv, project);
+    if (!store && srv && srv->store) {
+        store = srv->store;
+    }
+    REQUIRE_STORE(store, project);
+
+    char *not_indexed = verify_project_indexed(store, project);
+    if (not_indexed && srv && srv->store == store && cbm_store_count_nodes(store, project) > 0) {
+        free(not_indexed);
+        not_indexed = NULL;
+    }
+    if (not_indexed) {
+        free(project);
+        return not_indexed;
+    }
+
+    char *file_path = cbm_mcp_get_string_arg(args, "file_path");
+    char *label = cbm_mcp_get_string_arg(args, "label");
+    char *min_confidence = cbm_mcp_get_string_arg(args, "min_confidence");
+    int limit = cbm_mcp_get_int_arg(args, "limit", 30);
+
+    bool exclude_exported = true;
+    yyjson_doc *args_doc = args ? yyjson_read(args, strlen(args), 0) : NULL;
+    if (args_doc) {
+        yyjson_val *aroot = yyjson_doc_get_root(args_doc);
+        yyjson_val *ee = yyjson_obj_get(aroot, "exclude_exported");
+        if (ee && yyjson_is_bool(ee)) {
+            exclude_exported = yyjson_get_bool(ee);
+        }
+        yyjson_doc_free(args_doc);
+    }
+
+    cbm_find_dead_code_opts_t opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.file_path = file_path;
+    opts.label = label;
+    opts.exclude_exported = exclude_exported;
+    opts.min_confidence = min_confidence;
+    opts.limit = limit;
+
+    cbm_find_dead_code_result_t *res = NULL;
+    int rc = cbm_store_find_dead_code(store, project, &opts, &res);
+    if (rc != CBM_STORE_OK || !res) {
+        char err[CBM_SZ_512];
+        snprintf(err, sizeof(err), "failed to audit dead code for project '%s'",
+                 project ? project : "");
+        free(project);
+        free(file_path);
+        free(label);
+        free(min_confidence);
+        return cbm_mcp_text_result(err, true);
+    }
+
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+    yyjson_mut_val *root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
+
+    yyjson_mut_obj_add_str(doc, root, "project", res->project ? res->project : (project ? project : ""));
+    yyjson_mut_obj_add_int(doc, root, "total_dead_candidates_found", res->total_dead_candidates_found);
+
+    yyjson_mut_val *cb = yyjson_mut_obj(doc);
+    yyjson_mut_obj_add_int(doc, cb, "HIGH", res->confidence_high);
+    yyjson_mut_obj_add_int(doc, cb, "MEDIUM", res->confidence_medium);
+    yyjson_mut_obj_add_int(doc, cb, "LOW", res->confidence_low);
+    yyjson_mut_obj_add_val(doc, root, "confidence_breakdown", cb);
+
+    yyjson_mut_val *syms_arr = yyjson_mut_arr(doc);
+    for (int i = 0; i < res->dead_symbols_count; i++) {
+        cbm_dead_code_item_t *item = &res->dead_symbols[i];
+        yyjson_mut_val *sobj = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_str(doc, sobj, "name", item->name ? item->name : "");
+        yyjson_mut_obj_add_str(doc, sobj, "qualified_name", item->qualified_name ? item->qualified_name : "");
+        yyjson_mut_obj_add_str(doc, sobj, "label", item->label ? item->label : "Function");
+        yyjson_mut_obj_add_str(doc, sobj, "file_path", item->file_path ? item->file_path : "");
+
+        yyjson_mut_val *lr = yyjson_mut_arr(doc);
+        yyjson_mut_arr_add_int(doc, lr, item->start_line);
+        yyjson_mut_arr_add_int(doc, lr, item->end_line);
+        yyjson_mut_obj_add_val(doc, sobj, "line_range", lr);
+
+        yyjson_mut_obj_add_int(doc, sobj, "inbound_callers", item->inbound_callers);
+        yyjson_mut_obj_add_int(doc, sobj, "inbound_usages", item->inbound_usages);
+        yyjson_mut_obj_add_bool(doc, sobj, "is_exported", item->is_exported);
+        yyjson_mut_obj_add_str(doc, sobj, "confidence", item->confidence ? item->confidence : "HIGH");
+        yyjson_mut_obj_add_str(doc, sobj, "rationale", item->rationale ? item->rationale : "");
+        yyjson_mut_obj_add_int(doc, sobj, "estimated_lines_saved", item->estimated_lines_saved);
+
+        yyjson_mut_arr_add_val(syms_arr, sobj);
+    }
+    yyjson_mut_obj_add_val(doc, root, "dead_symbols", syms_arr);
+
+    yyjson_mut_val *sum_obj = yyjson_mut_obj(doc);
+    yyjson_mut_obj_add_int(doc, sum_obj, "total_lines_recoverable", res->total_lines_recoverable);
+    yyjson_mut_obj_add_str(doc, sum_obj, "action_prompt",
+                           res->action_prompt ? res->action_prompt
+                                              : "Run 'git rm' or delete the verified HIGH-confidence symbols during refactoring.");
+    yyjson_mut_obj_add_val(doc, root, "summary", sum_obj);
+
+    char *json = yy_doc_to_str(doc);
+    yyjson_mut_doc_free(doc);
+
+    cbm_store_find_dead_code_result_free(res);
+    free(project);
+    free(file_path);
+    free(label);
+    free(min_confidence);
 
     char *mcp_res = cbm_mcp_text_result(json, false);
     free(json);
@@ -19256,6 +19383,9 @@ static char *dispatch_tool(cbm_mcp_server_t *srv, const char *tool_name, const c
     }
     if (strcmp(tool_name, "get_env_vars") == 0) {
         return handle_get_env_vars(srv, args_json);
+    }
+    if (strcmp(tool_name, "find_dead_code") == 0) {
+        return handle_find_dead_code(srv, args_json);
     }
 
 

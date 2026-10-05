@@ -330,6 +330,39 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     ),
   },
   {
+    name: "find_dead_code",
+    category: "Tracing & Architecture",
+    summary: "Audit unreferenced symbols and dead code candidates",
+    description:
+      "Audits the codebase for unreferenced functions, classes, and variables with zero inbound callers or usages, filtering out public API exports, entry points, and test suites.",
+    readOnly: true,
+    idempotent: true,
+    parameters: [
+      { name: "project", type: "string", required: true, description: "Target project identifier registered in Codebase Memory" },
+      { name: "file_path", type: "string", required: false, description: "Optional file path or directory prefix to restrict dead code analysis" },
+      { name: "label", type: "string", required: false, defaultVal: "ALL", enumVals: ["ALL", "Function", "Class", "Variable", "Method"], description: "Symbol type filter: Function, Class, Variable, Method, or ALL" },
+      { name: "exclude_exported", type: "boolean", required: false, defaultVal: true, description: "Exclude symbols exported across module or library boundaries via lsp_surface" },
+      { name: "min_confidence", type: "string", required: false, defaultVal: "HIGH", enumVals: ["HIGH", "MEDIUM", "LOW"], description: "Minimum confidence threshold: HIGH (private/internal with 0 calls), MEDIUM (module-scoped), LOW (all 0-in-degree symbols)" },
+      { name: "limit", type: "integer", required: false, defaultVal: 30, description: "Maximum number of dead symbols to return (1-100)" },
+    ],
+    cliExample: "cbm cli find_dead_code --project={PROJECT} --label=Function --min-confidence=HIGH",
+    jsonExample: JSON.stringify(
+      {
+        name: "find_dead_code",
+        arguments: {
+          project: "{PROJECT}",
+          file_path: "src/pipeline/",
+          label: "Function",
+          exclude_exported: true,
+          min_confidence: "HIGH",
+          limit: 30,
+        },
+      },
+      null,
+      2
+    ),
+  },
+  {
     name: "get_code_snippet",
     category: "Code Discovery",
     summary: "Fetch precise source code for a symbol, function, or line range",
