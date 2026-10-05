@@ -1437,6 +1437,7 @@ TEST(mcp_tools_have_behavior_annotations) {
         {"find_code_clones", true, false, true, false},
         {"get_coupled_files", true, false, true, false},
         {"get_env_vars", true, false, true, false},
+        {"find_dead_code", true, false, true, false},
     };
 
     char *json = cbm_mcp_tools_list();
@@ -23415,6 +23416,286 @@ TEST(tool_get_env_vars_generate_example) {
     PASS();
 }
 
+TEST(tool_find_dead_code_orphan) {
+    const char *project = "test-dead-orphan";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-dead-orphan"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    /* 1. Orphan internal function */
+    cbm_node_t n_orphan = {0};
+    n_orphan.project = project;
+    n_orphan.label = "Function";
+    n_orphan.name = "legacy_parse_token_stream";
+    n_orphan.qualified_name = "src.pipeline.legacy_parser.legacy_parse_token_stream";
+    n_orphan.file_path = "src/pipeline/legacy_parser.c";
+    n_orphan.start_line = 210;
+    n_orphan.end_line = 245;
+    n_orphan.properties_json = "{\"is_static\":true}";
+    int64_t orphan_id = cbm_store_upsert_node(st, &n_orphan);
+    ASSERT_GT(orphan_id, 0);
+
+    /* 2. Live function that has an inbound caller */
+    cbm_node_t n_live = {0};
+    n_live.project = project;
+    n_live.label = "Function";
+    n_live.name = "active_helper";
+    n_live.qualified_name = "src.pipeline.active_helper";
+    n_live.file_path = "src/pipeline/parser.c";
+    n_live.start_line = 10;
+    n_live.end_line = 20;
+    int64_t live_id = cbm_store_upsert_node(st, &n_live);
+    ASSERT_GT(live_id, 0);
+
+    cbm_node_t n_caller = {0};
+    n_caller.project = project;
+    n_caller.label = "Function";
+    n_caller.name = "main";
+    n_caller.qualified_name = "src.pipeline.main";
+    n_caller.file_path = "src/pipeline/main.c";
+    n_caller.start_line = 50;
+    n_caller.end_line = 60;
+    int64_t caller_id = cbm_store_upsert_node(st, &n_caller);
+    ASSERT_GT(caller_id, 0);
+
+    cbm_edge_t e_call = {0};
+    e_call.project = project;
+    e_call.source_id = caller_id;
+    e_call.target_id = live_id;
+    e_call.type = "CALLS";
+    ASSERT_GT(cbm_store_insert_edge(st, &e_call), 0);
+
+    char *resp = cbm_mcp_handle_tool(
+        srv, "find_dead_code",
+        "{\"project\":\"test-dead-orphan\",\"min_confidence\":\"HIGH\"}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NULL(strstr(resp, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "\"total_dead_candidates_found\":1"));
+    ASSERT_NOT_NULL(strstr(resp, "\"name\":\"legacy_parse_token_stream\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"confidence\":\"HIGH\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"estimated_lines_saved\":36"));
+    ASSERT_NOT_NULL(strstr(resp, "\"inbound_callers\":0"));
+    ASSERT_NOT_NULL(strstr(resp, "\"inbound_usages\":0"));
+    ASSERT_NOT_NULL(strstr(resp, "\"is_exported\":false"));
+    ASSERT_NOT_NULL(strstr(resp, "Static C function with 0 callers and 0 references in the repository."));
+    ASSERT_NULL(strstr(resp, "\"name\":\"active_helper\""));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_find_dead_code_preserves_entrypoints) {
+    const char *project = "test-dead-entrypoints";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-dead-entrypoints"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    /* 1. main entry point */
+    cbm_node_t n_main = {0};
+    n_main.project = project;
+    n_main.label = "Function";
+    n_main.name = "main";
+    n_main.qualified_name = "src.cli.main";
+    n_main.file_path = "src/cli/main.c";
+    n_main.start_line = 1;
+    n_main.end_line = 50;
+    ASSERT_GT(cbm_store_upsert_node(st, &n_main), 0);
+
+    /* 2. CLI dispatcher marked as entry point */
+    cbm_node_t n_cli = {0};
+    n_cli.project = project;
+    n_cli.label = "Function";
+    n_cli.name = "cli_dispatcher";
+    n_cli.qualified_name = "src.cli.cli_dispatcher";
+    n_cli.file_path = "src/cli/cli.c";
+    n_cli.start_line = 10;
+    n_cli.end_line = 80;
+    n_cli.properties_json = "{\"is_entry_point\":true}";
+    ASSERT_GT(cbm_store_upsert_node(st, &n_cli), 0);
+
+    /* 3. Dead function */
+    cbm_node_t n_dead = {0};
+    n_dead.project = project;
+    n_dead.label = "Function";
+    n_dead.name = "truly_dead_fn";
+    n_dead.qualified_name = "src.util.truly_dead_fn";
+    n_dead.file_path = "src/util.c";
+    n_dead.start_line = 100;
+    n_dead.end_line = 120;
+    n_dead.properties_json = "{\"is_static\":true}";
+    ASSERT_GT(cbm_store_upsert_node(st, &n_dead), 0);
+
+    char *resp = cbm_mcp_handle_tool(
+        srv, "find_dead_code",
+        "{\"project\":\"test-dead-entrypoints\"}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NULL(strstr(resp, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "\"total_dead_candidates_found\":1"));
+    ASSERT_NOT_NULL(strstr(resp, "\"name\":\"truly_dead_fn\""));
+    ASSERT_NULL(strstr(resp, "\"name\":\"main\""));
+    ASSERT_NULL(strstr(resp, "\"name\":\"cli_dispatcher\""));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_find_dead_code_preserves_routes) {
+    const char *project = "test-dead-routes";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-dead-routes"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    /* 1. Controller Function: users_controller linked to Route via HANDLES */
+    cbm_node_t n_ctrl1 = {0};
+    n_ctrl1.project = project;
+    n_ctrl1.label = "Function";
+    n_ctrl1.name = "users_controller";
+    n_ctrl1.qualified_name = "src.controllers.users_controller";
+    n_ctrl1.file_path = "src/controllers/users.c";
+    n_ctrl1.start_line = 10;
+    n_ctrl1.end_line = 40;
+    int64_t ctrl1_id = cbm_store_upsert_node(st, &n_ctrl1);
+    ASSERT_GT(ctrl1_id, 0);
+
+    cbm_node_t n_route1 = {0};
+    n_route1.project = project;
+    n_route1.label = "Route";
+    n_route1.name = "GET /api/users";
+    n_route1.qualified_name = "__route__GET /api/users";
+    n_route1.file_path = "src/controllers/users.c";
+    int64_t route1_id = cbm_store_upsert_node(st, &n_route1);
+    ASSERT_GT(route1_id, 0);
+
+    cbm_edge_t e_h1 = {0};
+    e_h1.project = project;
+    e_h1.source_id = ctrl1_id;
+    e_h1.target_id = route1_id;
+    e_h1.type = "HANDLES";
+    ASSERT_GT(cbm_store_insert_edge(st, &e_h1), 0);
+
+    /* 2. Route node linking to orders_controller (reverse direction) */
+    cbm_node_t n_ctrl2 = {0};
+    n_ctrl2.project = project;
+    n_ctrl2.label = "Function";
+    n_ctrl2.name = "orders_controller";
+    n_ctrl2.qualified_name = "src.controllers.orders_controller";
+    n_ctrl2.file_path = "src/controllers/orders.c";
+    n_ctrl2.start_line = 15;
+    n_ctrl2.end_line = 50;
+    int64_t ctrl2_id = cbm_store_upsert_node(st, &n_ctrl2);
+    ASSERT_GT(ctrl2_id, 0);
+
+    cbm_node_t n_route2 = {0};
+    n_route2.project = project;
+    n_route2.label = "Route";
+    n_route2.name = "POST /api/orders";
+    n_route2.qualified_name = "__route__POST /api/orders";
+    n_route2.file_path = "src/controllers/orders.c";
+    int64_t route2_id = cbm_store_upsert_node(st, &n_route2);
+    ASSERT_GT(route2_id, 0);
+
+    cbm_edge_t e_h2 = {0};
+    e_h2.project = project;
+    e_h2.source_id = route2_id;
+    e_h2.target_id = ctrl2_id;
+    e_h2.type = "HANDLES";
+    ASSERT_GT(cbm_store_insert_edge(st, &e_h2), 0);
+
+    /* 3. Dead function not linked to any Route */
+    cbm_node_t n_dead = {0};
+    n_dead.project = project;
+    n_dead.label = "Function";
+    n_dead.name = "unused_endpoint_helper";
+    n_dead.qualified_name = "src.controllers.unused_endpoint_helper";
+    n_dead.file_path = "src/controllers/helpers.c";
+    n_dead.start_line = 100;
+    n_dead.end_line = 130;
+    n_dead.properties_json = "{\"is_static\":true}";
+    ASSERT_GT(cbm_store_upsert_node(st, &n_dead), 0);
+
+    char *resp = cbm_mcp_handle_tool(
+        srv, "find_dead_code",
+        "{\"project\":\"test-dead-routes\"}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NULL(strstr(resp, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "\"total_dead_candidates_found\":1"));
+    ASSERT_NOT_NULL(strstr(resp, "\"name\":\"unused_endpoint_helper\""));
+    ASSERT_NULL(strstr(resp, "\"name\":\"users_controller\""));
+    ASSERT_NULL(strstr(resp, "\"name\":\"orders_controller\""));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_find_dead_code_filters) {
+    const char *project = "test-dead-filters";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-dead-filters"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    /* Dead Variable in src/compat/ */
+    cbm_node_t n_var = {0};
+    n_var.project = project;
+    n_var.label = "Variable";
+    n_var.name = "UNUSED_BUFFER_CAPACITY";
+    n_var.qualified_name = "src.compat.UNUSED_BUFFER_CAPACITY";
+    n_var.file_path = "src/compat/compat.c";
+    n_var.start_line = 34;
+    n_var.end_line = 34;
+    n_var.properties_json = "{\"is_static\":true}";
+    ASSERT_GT(cbm_store_upsert_node(st, &n_var), 0);
+
+    /* Dead Function in src/pipeline/ */
+    cbm_node_t n_fn = {0};
+    n_fn.project = project;
+    n_fn.label = "Function";
+    n_fn.name = "dead_parser_fn";
+    n_fn.qualified_name = "src.pipeline.dead_parser_fn";
+    n_fn.file_path = "src/pipeline/parser.c";
+    n_fn.start_line = 10;
+    n_fn.end_line = 30;
+    n_fn.properties_json = "{\"is_static\":true}";
+    ASSERT_GT(cbm_store_upsert_node(st, &n_fn), 0);
+
+    /* 1. Filter by label: Variable */
+    char *resp_var = cbm_mcp_handle_tool(
+        srv, "find_dead_code",
+        "{\"project\":\"test-dead-filters\",\"label\":\"Variable\"}");
+    ASSERT_NOT_NULL(resp_var);
+    ASSERT_NOT_NULL(strstr(resp_var, "\"total_dead_candidates_found\":1"));
+    ASSERT_NOT_NULL(strstr(resp_var, "\"name\":\"UNUSED_BUFFER_CAPACITY\""));
+    ASSERT_NULL(strstr(resp_var, "\"name\":\"dead_parser_fn\""));
+    free(resp_var);
+
+    /* 2. Filter by file_path: src/pipeline */
+    char *resp_path = cbm_mcp_handle_tool(
+        srv, "find_dead_code",
+        "{\"project\":\"test-dead-filters\",\"file_path\":\"src/pipeline\"}");
+    ASSERT_NOT_NULL(resp_path);
+    ASSERT_NOT_NULL(strstr(resp_path, "\"total_dead_candidates_found\":1"));
+    ASSERT_NOT_NULL(strstr(resp_path, "\"name\":\"dead_parser_fn\""));
+    ASSERT_NULL(strstr(resp_path, "\"name\":\"UNUSED_BUFFER_CAPACITY\""));
+    free(resp_path);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
 TEST(tool_trace_cursor_truncated_after_leg_is_rejected) {
     cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
     ASSERT_NOT_NULL(srv);
@@ -23510,6 +23791,10 @@ SUITE(mcp) {
     RUN_TEST(tool_get_env_vars_consumers);
     RUN_TEST(tool_get_env_vars_filtering);
     RUN_TEST(tool_get_env_vars_generate_example);
+    RUN_TEST(tool_find_dead_code_orphan);
+    RUN_TEST(tool_find_dead_code_preserves_entrypoints);
+    RUN_TEST(tool_find_dead_code_preserves_routes);
+    RUN_TEST(tool_find_dead_code_filters);
     RUN_TEST(index_repository_async_and_status_refused_without_daemon_issue2144);
     RUN_TEST(index_repository_schema_documents_async_polling_issue2144);
     RUN_TEST(tool_result_add_notice_keeps_payload_shape_issue2144);

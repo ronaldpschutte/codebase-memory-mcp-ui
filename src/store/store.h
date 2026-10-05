@@ -1423,7 +1423,50 @@ int cbm_store_get_env_vars(cbm_store_t *s, const char *project,
                            cbm_get_env_vars_result_t **out);
 void cbm_store_get_env_vars_result_free(cbm_get_env_vars_result_t *res);
 
+/* ── Dead code auditor (RFC 007) ─────────────────────────────────── */
+
+typedef struct {
+    char *name;
+    char *qualified_name;
+    char *label;
+    char *file_path;
+    int start_line;
+    int end_line;
+    int inbound_callers;
+    int inbound_usages;
+    bool is_exported;
+    char *confidence;       /* "HIGH", "MEDIUM", "LOW" */
+    char *rationale;
+    int estimated_lines_saved;
+} cbm_dead_code_item_t;
+
+typedef struct {
+    char *project;
+    int total_dead_candidates_found;
+    int confidence_high;
+    int confidence_medium;
+    int confidence_low;
+    cbm_dead_code_item_t *dead_symbols;
+    int dead_symbols_count;
+    int total_lines_recoverable;
+    char *action_prompt;
+} cbm_find_dead_code_result_t;
+
+typedef struct {
+    const char *file_path;         /* optional file or dir prefix filter */
+    const char *label;             /* "ALL", "Function", "Class", "Variable", "Method" (default "ALL") */
+    bool exclude_exported;         /* default true */
+    const char *min_confidence;    /* "HIGH", "MEDIUM", "LOW" (default "HIGH") */
+    int limit;                     /* default 30, min 1, max 100 */
+} cbm_find_dead_code_opts_t;
+
+int cbm_store_find_dead_code(cbm_store_t *s, const char *project,
+                             const cbm_find_dead_code_opts_t *opts,
+                             cbm_find_dead_code_result_t **out);
+void cbm_store_find_dead_code_result_free(cbm_find_dead_code_result_t *res);
+
 #endif /* CBM_STORE_H */
+
 
 
 
