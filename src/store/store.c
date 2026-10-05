@@ -11582,3 +11582,338 @@ int cbm_store_audit_test_coverage(cbm_store_t *s, const char *project,
     return CBM_STORE_OK;
 }
 
+/* ── Structural and semantic code clones catalog (RFC 004) ────────── */
+
+void cbm_store_find_clones_result_free(cbm_find_clones_result_t *res) {
+    if (!res) {
+        return;
+    }
+    free(res->project);
+    free(res->target);
+    free(res->file_path);
+    free(res->refactoring_recommendation);
+
+    if (res->clones) {
+        for (int i = 0; i < res->clones_found; i++) {
+            cbm_code_clone_item_t *item = &res->clones[i];
+            free(item->qualified_name);
+            free(item->file_path);
+            free(item->edge_type);
+            free(item->clone_type);
+            free(item->differences);
+        }
+        free(res->clones);
+    }
+
+    if (res->top_clone_clusters) {
+        for (int i = 0; i < res->top_clone_clusters_count; i++) {
+            cbm_clone_cluster_t *cl = &res->top_clone_clusters[i];
+            free(cl->representative_symbol);
+            free(cl->representative_file);
+            free(cl->description);
+            if (cl->files_involved) {
+                for (int j = 0; j < cl->files_involved_count; j++) {
+                    free(cl->files_involved[j]);
+                }
+                free(cl->files_involved);
+            }
+        }
+        free(res->top_clone_clusters);
+    }
+
+    free(res);
+}
+
+int cbm_store_find_code_clones(cbm_store_t *s, const char *project,
+                               const cbm_find_clones_opts_t *opts,
+                               cbm_find_clones_result_t **out) {
+    if (!out) {
+        return CBM_STORE_ERR;
+    }
+    *out = NULL;
+    if (!s || !s->db || !project || project[0] == '\0') {
+        return CBM_STORE_ERR;
+    }
+
+    const char *target = opts ? opts->target : NULL;
+    const char *file_filter = opts ? opts->file_path : NULL;
+    double min_similarity = (opts && opts->min_similarity >= 0.50 && opts->min_similarity <= 1.00)
+                                ? opts->min_similarity
+                                : 0.75;
+    const char *mode = (opts && opts->mode && opts->mode[0] != '\0') ? opts->mode : "all";
+    int limit = (opts && opts->limit > 0) ? opts->limit : 20;
+    if (limit > 100) limit = 100;
+    if (limit < 1) limit = 1;
+
+    cbm_find_clones_result_t *res = calloc(1, sizeof(*res));
+    if (!res) {
+        return CBM_STORE_ERR;
+    }
+    res->project = strdup(project);
+
+    /* Prepare file pattern for LIKE if file_filter provided */
+    char file_pattern[CBM_SZ_1K] = "";
+    if (file_filter && file_filter[0] != '\0') {
+        size_t flen = strlen(file_filter);
+        if (file_filter[flen - 1] == '/' || file_filter[flen - 1] == '\\') {
+            snprintf(file_pattern, sizeof(file_pattern), "%s%%", file_filter);
+        } else {
+            snprintf(file_pattern, sizeof(file_pattern), "%s/%%", file_filter);
+        }
+    }
+
+    if (target && target[0] != '\0') {
+        /* Scenario A: Target Symbol Clone Query */
+        const char *resolve_sql =
+            "SELECT id, name, qualified_name, file_path, start_line, end_line "
+            "FROM nodes "
+            "WHERE project = ?1 AND (qualified_name = ?2 OR name = ?2) "
+            "ORDER BY (qualified_name = ?2) DESC, (name = ?2) DESC "
+            "LIMIT 1;";
+
+        sqlite3_stmt *stmt = NULL;
+        if (sqlite3_prepare_v2(s->db, resolve_sql, -1, &stmt, NULL) != SQLITE_OK) {
+            cbm_store_find_clones_result_free(res);
+            return CBM_STORE_ERR;
+        }
+        sqlite3_bind_text(stmt, 1, project, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 2, target, -1, SQLITE_STATIC);
+
+        if (sqlite3_step(stmt) != SQLITE_ROW) {
+            sqlite3_finalize(stmt);
+            cbm_store_find_clones_result_free(res);
+            return CBM_STORE_NOT_FOUND;
+        }
+
+        int64_t target_id = sqlite3_column_int64(stmt, 0);
+        const char *tname = (const char *)sqlite3_column_text(stmt, 1);
+        const char *tqn = (const char *)sqlite3_column_text(stmt, 2);
+        const char *tfp = (const char *)sqlite3_column_text(stmt, 3);
+
+        res->target = strdup(tqn ? tqn : (tname ? tname : target));
+        res->file_path = strdup(tfp ? tfp : "");
+        sqlite3_finalize(stmt);
+
+        /* Query similar nodes (handling edges in both directions) */
+        const char *clones_sql =
+            "SELECT "
+            "    other.id, "
+            "    coalesce(other.qualified_name, other.name) AS qn, "
+            "    other.file_path, "
+            "    other.start_line, "
+            "    other.end_line, "
+            "    e.type AS edge_type, "
+            "    coalesce(cast(json_extract(e.properties, '$.similarity') AS REAL), 0.80) AS sim_score "
+            "FROM edges e "
+            "JOIN nodes other ON ( "
+            "    (e.source_id = ?1 AND e.target_id = other.id) "
+            "    OR "
+            "    (e.target_id = ?1 AND e.source_id = other.id) "
+            ") "
+            "WHERE e.project = ?2 "
+            "  AND other.id != ?1 "
+            "  AND (?3 = 'all' OR (?3 = 'structural' AND e.type = 'SIMILAR_TO') OR (?3 = 'semantic' AND e.type = 'SEMANTICALLY_RELATED')) "
+            "  AND e.type IN ('SIMILAR_TO', 'SEMANTICALLY_RELATED') "
+            "  AND coalesce(cast(json_extract(e.properties, '$.similarity') AS REAL), 0.80) >= ?4 "
+            "  AND (?5 IS NULL OR other.file_path = ?5 OR other.file_path LIKE ?6) "
+            "GROUP BY other.id "
+            "ORDER BY sim_score DESC "
+            "LIMIT ?7;";
+
+        if (sqlite3_prepare_v2(s->db, clones_sql, -1, &stmt, NULL) == SQLITE_OK) {
+            sqlite3_bind_int64(stmt, 1, target_id);
+            sqlite3_bind_text(stmt, 2, project, -1, SQLITE_STATIC);
+            sqlite3_bind_text(stmt, 3, mode, -1, SQLITE_STATIC);
+            sqlite3_bind_double(stmt, 4, min_similarity);
+            if (file_filter && file_filter[0] != '\0') {
+                sqlite3_bind_text(stmt, 5, file_filter, -1, SQLITE_STATIC);
+                sqlite3_bind_text(stmt, 6, file_pattern, -1, SQLITE_STATIC);
+            } else {
+                sqlite3_bind_null(stmt, 5);
+                sqlite3_bind_null(stmt, 6);
+            }
+            sqlite3_bind_int(stmt, 7, limit);
+
+            int cap = 16;
+            res->clones = malloc((size_t)cap * sizeof(cbm_code_clone_item_t));
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                const char *qn = (const char *)sqlite3_column_text(stmt, 1);
+                const char *fp = (const char *)sqlite3_column_text(stmt, 2);
+                int sline = sqlite3_column_int(stmt, 3);
+                int eline = sqlite3_column_int(stmt, 4);
+                const char *etype = (const char *)sqlite3_column_text(stmt, 5);
+                double sim = sqlite3_column_double(stmt, 6);
+
+                if (res->clones_found >= cap) {
+                    cap *= 2;
+                    cbm_code_clone_item_t *grown = realloc(res->clones, (size_t)cap * sizeof(cbm_code_clone_item_t));
+                    if (grown) res->clones = grown;
+                }
+
+                if (res->clones && res->clones_found < cap) {
+                    cbm_code_clone_item_t *item = &res->clones[res->clones_found++];
+                    memset(item, 0, sizeof(*item));
+                    item->qualified_name = strdup(qn ? qn : "");
+                    item->file_path = strdup(fp ? fp : "");
+                    item->start_line = sline;
+                    item->end_line = eline;
+                    item->similarity_score = sim;
+                    item->edge_type = strdup(etype ? etype : "SIMILAR_TO");
+
+                    if (sim >= 0.95) {
+                        item->clone_type = strdup("Exact / Type-1 Clone");
+                        item->differences = strdup("Identical AST structure and control flow; minor naming or formatting variations.");
+                    } else if (sim >= 0.85) {
+                        item->clone_type = strdup("Near-Duplicate / Type-2 Clone");
+                        item->differences = strdup("Matching structural control flow with minor parameter or condition differences.");
+                    } else if (sim >= 0.70) {
+                        item->clone_type = strdup("Modified Implementation / Type-3 Clone");
+                        item->differences = strdup("Similar algorithmic structure with modified statements or expressions.");
+                    } else {
+                        item->clone_type = strdup("Semantic / Type-4 Clone");
+                        item->differences = strdup("Shared semantic context and conceptual overlap.");
+                    }
+                }
+            }
+            sqlite3_finalize(stmt);
+        }
+
+        if (res->clones_found > 0) {
+            char rec[512];
+            snprintf(rec, sizeof(rec), "Consider consolidating these %d implementations into a shared utility function.",
+                     res->clones_found + 1);
+            res->refactoring_recommendation = strdup(rec);
+        } else {
+            char rec[256];
+            snprintf(rec, sizeof(rec), "No code clones found above the similarity threshold (%.2f).", min_similarity);
+            res->refactoring_recommendation = strdup(rec);
+        }
+
+        *out = res;
+        return CBM_STORE_OK;
+    }
+
+    /* Scenario B: Project-Wide Top Duplicate Clusters */
+    const char *count_sql =
+        "SELECT COUNT(*) FROM edges "
+        "WHERE project = ?1 "
+        "  AND (?2 = 'all' OR (?2 = 'structural' AND type = 'SIMILAR_TO') OR (?2 = 'semantic' AND type = 'SEMANTICALLY_RELATED')) "
+        "  AND type IN ('SIMILAR_TO', 'SEMANTICALLY_RELATED');";
+
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(s->db, count_sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, project, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 2, mode, -1, SQLITE_STATIC);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            res->total_clones_indexed = sqlite3_column_int(stmt, 0);
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    const char *clusters_sql =
+        "SELECT "
+        "    coalesce(n1.qualified_name, n1.name) AS rep_symbol, "
+        "    n1.file_path AS rep_file, "
+        "    COUNT(DISTINCT n2.id) + 1 AS instance_count, "
+        "    AVG(coalesce(cast(json_extract(e.properties, '$.similarity') AS REAL), 0.80)) AS avg_sim, "
+        "    GROUP_CONCAT(DISTINCT n2.file_path) AS other_files "
+        "FROM edges e "
+        "JOIN nodes n1 ON e.source_id = n1.id "
+        "JOIN nodes n2 ON e.target_id = n2.id "
+        "WHERE e.project = ?1 "
+        "  AND (?2 = 'all' OR (?2 = 'structural' AND e.type = 'SIMILAR_TO') OR (?2 = 'semantic' AND e.type = 'SEMANTICALLY_RELATED')) "
+        "  AND e.type IN ('SIMILAR_TO', 'SEMANTICALLY_RELATED') "
+        "  AND coalesce(cast(json_extract(e.properties, '$.similarity') AS REAL), 0.80) >= ?3 "
+        "  AND (?4 IS NULL OR n1.file_path = ?4 OR n1.file_path LIKE ?5 OR n2.file_path = ?4 OR n2.file_path LIKE ?5) "
+        "GROUP BY n1.id "
+        "ORDER BY instance_count DESC, avg_sim DESC "
+        "LIMIT ?6;";
+
+    if (sqlite3_prepare_v2(s->db, clusters_sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, project, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 2, mode, -1, SQLITE_STATIC);
+        sqlite3_bind_double(stmt, 3, min_similarity);
+        if (file_filter && file_filter[0] != '\0') {
+            sqlite3_bind_text(stmt, 4, file_filter, -1, SQLITE_STATIC);
+            sqlite3_bind_text(stmt, 5, file_pattern, -1, SQLITE_STATIC);
+        } else {
+            sqlite3_bind_null(stmt, 4);
+            sqlite3_bind_null(stmt, 5);
+        }
+        sqlite3_bind_int(stmt, 6, limit);
+
+        int cap = 16;
+        res->top_clone_clusters = malloc((size_t)cap * sizeof(cbm_clone_cluster_t));
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const char *rep_symbol = (const char *)sqlite3_column_text(stmt, 0);
+            const char *rep_file = (const char *)sqlite3_column_text(stmt, 1);
+            int icount = sqlite3_column_int(stmt, 2);
+            double avg_sim = sqlite3_column_double(stmt, 3);
+            const char *other_files = (const char *)sqlite3_column_text(stmt, 4);
+
+            if (res->top_clone_clusters_count >= cap) {
+                cap *= 2;
+                cbm_clone_cluster_t *grown = realloc(res->top_clone_clusters, (size_t)cap * sizeof(cbm_clone_cluster_t));
+                if (grown) res->top_clone_clusters = grown;
+            }
+
+            if (res->top_clone_clusters && res->top_clone_clusters_count < cap) {
+                cbm_clone_cluster_t *cluster = &res->top_clone_clusters[res->top_clone_clusters_count++];
+                memset(cluster, 0, sizeof(*cluster));
+                cluster->cluster_id = res->top_clone_clusters_count;
+                cluster->representative_symbol = strdup(rep_symbol ? rep_symbol : "");
+                cluster->representative_file = strdup(rep_file ? rep_file : "");
+                cluster->instance_count = icount;
+                cluster->average_similarity = ((double)((int)(avg_sim * 100.0 + 0.5))) / 100.0;
+
+                /* Parse files_involved */
+                int fcap = 8;
+                cluster->files_involved = malloc((size_t)fcap * sizeof(char *));
+                if (rep_file && rep_file[0] != '\0') {
+                    cluster->files_involved[cluster->files_involved_count++] = strdup(rep_file);
+                }
+
+                if (other_files && other_files[0] != '\0') {
+                    char *copy = strdup(other_files);
+                    if (copy) {
+                        char *token = strtok(copy, ",");
+                        while (token) {
+                            /* Check if already in files_involved */
+                            bool exists = false;
+                            for (int fi = 0; fi < cluster->files_involved_count; fi++) {
+                                if (strcmp(cluster->files_involved[fi], token) == 0) {
+                                    exists = true;
+                                    break;
+                                }
+                            }
+                            if (!exists) {
+                                if (cluster->files_involved_count >= fcap) {
+                                    fcap *= 2;
+                                    char **fgrown = realloc(cluster->files_involved, (size_t)fcap * sizeof(char *));
+                                    if (fgrown) cluster->files_involved = fgrown;
+                                }
+                                if (cluster->files_involved && cluster->files_involved_count < fcap) {
+                                    cluster->files_involved[cluster->files_involved_count++] = strdup(token);
+                                }
+                            }
+                            token = strtok(NULL, ",");
+                        }
+                        free(copy);
+                    }
+                }
+
+                char desc[512];
+                snprintf(desc, sizeof(desc), "Duplicate logic cluster around %s across %d files (avg similarity %.2f).",
+                         rep_symbol ? rep_symbol : "symbol",
+                         cluster->files_involved_count > 0 ? cluster->files_involved_count : 1,
+                         cluster->average_similarity);
+                cluster->description = strdup(desc);
+            }
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    *out = res;
+    return CBM_STORE_OK;
+}
+
