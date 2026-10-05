@@ -915,6 +915,15 @@ static const tool_def_t TOOLS[] = {
      "\"min_confidence\":{\"type\":\"string\",\"enum\":[\"HIGH\",\"MEDIUM\",\"LOW\"],\"default\":\"HIGH\",\"description\":\"Minimum confidence threshold: HIGH (private/internal with 0 calls), MEDIUM (module-scoped), LOW (all 0-in-degree symbols).\"},"
      "\"limit\":{\"type\":\"integer\",\"default\":30,\"minimum\":1,\"maximum\":100,\"description\":\"Maximum number of dead symbols to return.\"}"
      "},\"required\":[\"project\"]}"},
+
+    {"trace_error_flow",
+     "Traces error and exception propagation across a call tree: discovers all exception types that can bubble up to a target function or route from downstream callees.",
+     "{\"type\":\"object\",\"properties\":{"
+     "\"project\":{\"type\":\"string\",\"description\":\"Target project identifier registered in Codebase Memory.\"},"
+     "\"target\":{\"type\":\"string\",\"description\":\"Starting symbol (e.g. 'handle_rpc_post') or API route path (e.g. '/rpc').\"},"
+     "\"max_depth\":{\"type\":\"integer\",\"default\":4,\"minimum\":1,\"maximum\":8,\"description\":\"Maximum call depth to traverse looking for downstream errors.\"},"
+     "\"unhandled_only\":{\"type\":\"boolean\",\"default\":false,\"description\":\"If true, only returns exceptions that lack an enclosing catch/recovery block.\"}"
+     "},\"required\":[\"project\",\"target\"]}"},
 };
 
 static const int TOOL_COUNT = sizeof(TOOLS) / sizeof(TOOLS[0]);
@@ -953,6 +962,7 @@ static const tool_annotation_def_t TOOL_ANNOTATIONS[] = {
     {"get_coupled_files", true, false, true, false},
     {"get_env_vars", true, false, true, false},
     {"find_dead_code", true, false, true, false},
+    {"trace_error_flow", true, false, true, false},
     {"get_code_snippet", true, false, true, false},
     {"get_file_outline", true, false, true, false},
     {"get_graph_schema", true, false, true, false},
@@ -9279,6 +9289,115 @@ static char *handle_find_dead_code(cbm_mcp_server_t *srv, const char *args) {
     free(file_path);
     free(label);
     free(min_confidence);
+
+    char *mcp_res = cbm_mcp_text_result(json, false);
+    free(json);
+    return mcp_res;
+}
+
+static char *handle_trace_error_flow(cbm_mcp_server_t *srv, const char *args) {
+    char *project = get_project_arg(args);
+    cbm_store_t *store = resolve_store(srv, project);
+    if (!store && srv && srv->store) {
+        store = srv->store;
+    }
+    REQUIRE_STORE(store, project);
+
+    char *not_indexed = verify_project_indexed(store, project);
+    if (not_indexed && srv && srv->store == store && cbm_store_count_nodes(store, project) > 0) {
+        free(not_indexed);
+        not_indexed = NULL;
+    }
+    if (not_indexed) {
+        free(project);
+        return not_indexed;
+    }
+
+    char *target = cbm_mcp_get_string_arg(args, "target");
+    if (!target || target[0] == '\0') {
+        free(project);
+        free(target);
+        return cbm_mcp_text_result("missing required argument 'target'", true);
+    }
+
+    int max_depth = cbm_mcp_get_int_arg(args, "max_depth", 4);
+    if (max_depth < 1) max_depth = 1;
+    if (max_depth > 8) max_depth = 8;
+
+    bool unhandled_only = false;
+    yyjson_doc *args_doc = args ? yyjson_read(args, strlen(args), 0) : NULL;
+    if (args_doc) {
+        yyjson_val *aroot = yyjson_doc_get_root(args_doc);
+        yyjson_val *uo = yyjson_obj_get(aroot, "unhandled_only");
+        if (uo && yyjson_is_bool(uo)) {
+            unhandled_only = yyjson_get_bool(uo);
+        }
+        yyjson_doc_free(args_doc);
+    }
+
+    cbm_trace_error_flow_opts_t opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.max_depth = max_depth;
+    opts.unhandled_only = unhandled_only;
+
+    cbm_trace_error_flow_result_t *res = NULL;
+    int rc = cbm_store_trace_error_flow(store, project, target, &opts, &res);
+    if (rc != CBM_STORE_OK || !res) {
+        char err[CBM_SZ_512];
+        if (rc == CBM_STORE_NOT_FOUND) {
+            snprintf(err, sizeof(err), "target '%s' not found in project '%s'", target, project ? project : "");
+        } else {
+            snprintf(err, sizeof(err), "failed to trace error flow for '%s'", target);
+        }
+        free(project);
+        free(target);
+        return cbm_mcp_text_result(err, true);
+    }
+
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+    yyjson_mut_val *root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
+
+    yyjson_mut_obj_add_str(doc, root, "project", res->project ? res->project : (project ? project : ""));
+    yyjson_mut_obj_add_str(doc, root, "target", res->target ? res->target : target);
+    yyjson_mut_obj_add_str(doc, root, "file_path", res->file_path ? res->file_path : "");
+    yyjson_mut_obj_add_int(doc, root, "line", res->line);
+    yyjson_mut_obj_add_int(doc, root, "max_depth_searched", res->max_depth_searched);
+    yyjson_mut_obj_add_int(doc, root, "total_exceptions_detected", res->total_exceptions_detected);
+
+    yyjson_mut_val *errors_arr = yyjson_mut_arr(doc);
+    for (int i = 0; i < res->propagating_errors_count; i++) {
+        cbm_error_flow_item_t *item = &res->propagating_errors[i];
+        yyjson_mut_val *eobj = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_str(doc, eobj, "error_type", item->error_type ? item->error_type : "");
+        yyjson_mut_obj_add_str(doc, eobj, "origin_symbol", item->origin_symbol ? item->origin_symbol : "");
+        yyjson_mut_obj_add_str(doc, eobj, "origin_file", item->origin_file ? item->origin_file : "");
+        yyjson_mut_obj_add_int(doc, eobj, "origin_line", item->origin_line);
+        yyjson_mut_obj_add_int(doc, eobj, "call_distance", item->call_distance);
+        yyjson_mut_obj_add_str(doc, eobj, "call_path", item->call_path ? item->call_path : "");
+        yyjson_mut_obj_add_str(doc, eobj, "status", item->status ? item->status : "UNHANDLED");
+        if (item->handling_block) {
+            yyjson_mut_obj_add_str(doc, eobj, "handling_block", item->handling_block);
+        } else {
+            yyjson_mut_obj_add_null(doc, eobj, "handling_block");
+        }
+        if (item->risk) {
+            yyjson_mut_obj_add_str(doc, eobj, "risk", item->risk);
+        }
+        if (item->recommendation) {
+            yyjson_mut_obj_add_str(doc, eobj, "recommendation", item->recommendation);
+        }
+
+        yyjson_mut_arr_add_val(errors_arr, eobj);
+    }
+    yyjson_mut_obj_add_val(doc, root, "propagating_errors", errors_arr);
+
+    char *json = yy_doc_to_str(doc);
+    yyjson_mut_doc_free(doc);
+
+    cbm_store_trace_error_flow_result_free(res);
+    free(project);
+    free(target);
 
     char *mcp_res = cbm_mcp_text_result(json, false);
     free(json);
@@ -19386,6 +19505,9 @@ static char *dispatch_tool(cbm_mcp_server_t *srv, const char *tool_name, const c
     }
     if (strcmp(tool_name, "find_dead_code") == 0) {
         return handle_find_dead_code(srv, args_json);
+    }
+    if (strcmp(tool_name, "trace_error_flow") == 0) {
+        return handle_trace_error_flow(srv, args_json);
     }
 
 

@@ -363,6 +363,35 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     ),
   },
   {
+    name: "trace_error_flow",
+    category: "Tracing & Architecture",
+    summary: "Trace exception, error type, and panic propagation flow",
+    description:
+      "Traces error and exception propagation across a call tree: discovers all exception types that can bubble up to a target function or route from downstream callees.",
+    readOnly: true,
+    idempotent: true,
+    parameters: [
+      { name: "project", type: "string", required: true, description: "Target project identifier registered in Codebase Memory" },
+      { name: "target", type: "string", required: true, description: "Starting symbol (e.g. 'handle_rpc_post') or API route path (e.g. '/rpc')" },
+      { name: "max_depth", type: "integer", required: false, defaultVal: 4, description: "Maximum call depth to traverse looking for downstream errors (1-8)" },
+      { name: "unhandled_only", type: "boolean", required: false, defaultVal: false, description: "If true, only returns exceptions that lack an enclosing catch/recovery block" },
+    ],
+    cliExample: "cbm cli trace_error_flow --project={PROJECT} --target=\"handle_rpc_post\" --max-depth=4",
+    jsonExample: JSON.stringify(
+      {
+        name: "trace_error_flow",
+        arguments: {
+          project: "{PROJECT}",
+          target: "handle_rpc_post",
+          max_depth: 4,
+          unhandled_only: false,
+        },
+      },
+      null,
+      2
+    ),
+  },
+  {
     name: "get_code_snippet",
     category: "Code Discovery",
     summary: "Fetch precise source code for a symbol, function, or line range",
