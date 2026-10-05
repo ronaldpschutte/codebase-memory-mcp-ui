@@ -22,6 +22,7 @@
 #include "watcher/watcher.h"
 #include "cli/cli.h"
 #include "git/git_context.h"
+#include "ui/tool_call_log.h"
 
 #if defined(HAVE_LIBGIT2)
 #include <git2.h> /* git_repository_open, git_remote_lookup, git_remote_url */
@@ -556,6 +557,47 @@ static void handle_logs(cbm_http_conn_t *c, const cbm_http_req_t *req) {
 
     cbm_http_replyf(c, 200, g_cors_json, "%s", buf);
     free(buf);
+}
+
+/* ── Tool Call Log (/api/tool-calls) ─────────────────────────── */
+
+/* GET /api/tool-calls?limit=N&since_id=ID&tool=NAME&status=all|ok|error */
+static void handle_tool_calls(cbm_http_conn_t *c, const cbm_http_req_t *req) {
+    char limit_str[16] = {0};
+    int limit = 50;
+    if (cbm_http_query_param(req->query, "limit", limit_str, (int)sizeof(limit_str))) {
+        int v = atoi(limit_str);
+        if (v > 0)
+            limit = v;
+    }
+
+    char since_str[32] = {0};
+    uint64_t since_id = 0;
+    if (cbm_http_query_param(req->query, "since_id", since_str, (int)sizeof(since_str))) {
+        since_id = (uint64_t)strtoull(since_str, NULL, 10);
+    }
+
+    char tool_filter[64] = {0};
+    cbm_http_query_param(req->query, "tool", tool_filter, (int)sizeof(tool_filter));
+
+    char status_filter[32] = {0};
+    cbm_http_query_param(req->query, "status", status_filter, (int)sizeof(status_filter));
+
+    char *json = cbm_tool_call_log_to_json(limit, since_id, tool_filter, status_filter);
+    if (!json) {
+        cbm_http_replyf(c, 500, g_cors_json, "{\"error\":\"oom\"}");
+        return;
+    }
+
+    cbm_http_replyf(c, 200, g_cors_json, "%s", json);
+    free(json);
+}
+
+/* DELETE /api/tool-calls → clear all recorded tool calls */
+static void handle_tool_calls_clear(cbm_http_conn_t *c, const cbm_http_req_t *req) {
+    (void)req;
+    int cleared = cbm_tool_call_log_clear();
+    cbm_http_replyf(c, 200, g_cors_json, "{\"cleared\":true,\"count\":%d}", cleared);
 }
 
 /* ── Process monitoring ───────────────────────────────────────── */
@@ -2040,6 +2082,20 @@ static void dispatch_request(cbm_http_server_t *srv, cbm_http_conn_t *c,
     /* GET /api/logs → recent log lines */
     if (is_get && cbm_http_path_match(req->path, "/api/logs*")) {
         handle_logs(c, req);
+        return;
+    }
+
+    /* /api/tool-calls → live tool call log */
+    if (cbm_http_path_match(req->path, "/api/tool-calls*")) {
+        if (is_get) {
+            handle_tool_calls(c, req);
+            return;
+        }
+        if (is_delete) {
+            handle_tool_calls_clear(c, req);
+            return;
+        }
+        cbm_http_replyf(c, 405, g_cors_json, "{\"error\":\"method not allowed\"}");
         return;
     }
 

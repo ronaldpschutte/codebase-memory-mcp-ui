@@ -10,6 +10,7 @@
 #include "ui/config.h"
 #include "ui/embedded_assets.h"
 #include "ui/layout3d.h"
+#include "ui/tool_call_log.h"
 #include "store/store.h"
 #ifdef _WIN32
 #include "foundation/win_utf8.h"
@@ -859,6 +860,143 @@ TEST(layout_coincident_nodes_bounded) {
 #endif
 }
 
+/* ── Tool call log tests (RFC 009) ────────────────────────────── */
+
+TEST(tool_call_ring_record_and_retrieve) {
+    cbm_tool_call_log_clear();
+
+    for (int i = 0; i < 10; i++) {
+        char params[128];
+        snprintf(params, sizeof(params), "{\"project\":\"p%d\",\"index\":%d}", i, i);
+        cbm_tool_call_log_record(i % 2 == 0 ? "search_graph" : "analyze_blast_radius",
+                                 params, (i % 3 == 0), (int64_t)(1000 + i * 100), 200 + i * 10);
+    }
+
+    cbm_tool_call_record_t records[15];
+    int n = cbm_tool_call_log_get(records, 15);
+    ASSERT_EQ(n, 10);
+
+    for (int i = 0; i < n; i++) {
+        ASSERT_NOT_NULL(records[i].params_json);
+        ASSERT_NOT_NULL(strstr(records[i].params_json, "index"));
+        if (i % 2 == 0) {
+            ASSERT_STR_EQ(records[i].tool_name, "search_graph");
+        } else {
+            ASSERT_STR_EQ(records[i].tool_name, "analyze_blast_radius");
+        }
+        ASSERT_EQ(records[i].is_error, (i % 3 == 0));
+        free(records[i].params_json);
+    }
+
+    int cleared = cbm_tool_call_log_clear();
+    ASSERT_EQ(cleared, 10);
+    int n_after = cbm_tool_call_log_get(records, 15);
+    ASSERT_EQ(n_after, 0);
+
+    PASS();
+}
+
+TEST(tool_call_ring_overflow_wrap) {
+    cbm_tool_call_log_clear();
+
+    /* Insert 600 items into 500-capacity ring */
+    for (int i = 1; i <= 600; i++) {
+        char params[128];
+        snprintf(params, sizeof(params), "{\"id\":%d,\"name\":\"item_%d\"}", i, i);
+        cbm_tool_call_log_record("search_graph", params, false, 500, 100);
+    }
+
+    cbm_tool_call_record_t records[600];
+    int n = cbm_tool_call_log_get(records, 600);
+    ASSERT_EQ(n, 500);
+
+    /* Verify oldest 100 entries were evicted: first record should have id > 100 */
+    ASSERT_TRUE(records[0].id > 100);
+    ASSERT_EQ(records[499].id - records[0].id, 499);
+    ASSERT_NOT_NULL(strstr(records[499].params_json, "item_600"));
+
+    for (int i = 0; i < n; i++) {
+        free(records[i].params_json);
+    }
+
+    cbm_tool_call_log_clear();
+    PASS();
+}
+
+TEST(tool_call_param_truncation) {
+    cbm_tool_call_log_clear();
+
+    /* Create an oversized string (> 64 KB) */
+    size_t big_sz = 70 * 1024;
+    char *big_buf = malloc(big_sz);
+    ASSERT_NOT_NULL(big_buf);
+    memset(big_buf, 'x', big_sz - 1);
+    big_buf[big_sz - 1] = '\0';
+
+    cbm_tool_call_log_record("get_code_snippet", big_buf, false, 1200, 50);
+    free(big_buf);
+
+    cbm_tool_call_record_t records[2];
+    int n = cbm_tool_call_log_get(records, 2);
+    ASSERT_EQ(n, 1);
+    ASSERT_NOT_NULL(records[0].params_json);
+    ASSERT_TRUE(strlen(records[0].params_json) <= CBM_TOOL_CALL_PARAM_MAX + 32);
+    ASSERT_NOT_NULL(strstr(records[0].params_json, "(truncated)"));
+
+    free(records[0].params_json);
+    cbm_tool_call_log_clear();
+    PASS();
+}
+
+TEST(tool_call_http_endpoint) {
+    cbm_tool_call_log_clear();
+
+    /* Record entry with sensitive tokens */
+    cbm_tool_call_log_record("search_graph", "{\"project\":\"alpha\",\"token\":\"ghp_secret123\"}",
+                             false, 15000, 1234);
+    /* Record error entry */
+    cbm_tool_call_log_record("get_code_snippet", "{\"project\":\"alpha\",\"symbol\":\"missing\"}",
+                             true, 2500, 50);
+
+    /* Test full JSON output */
+    char *json = cbm_tool_call_log_to_json(50, 0, NULL, "all");
+    ASSERT_NOT_NULL(json);
+    ASSERT_NOT_NULL(strstr(json, "\"total\":2"));
+    ASSERT_NOT_NULL(strstr(json, "\"latest_id\":"));
+    ASSERT_NOT_NULL(strstr(json, "\"tool\":\"search_graph\""));
+    ASSERT_NOT_NULL(strstr(json, "\"tool\":\"get_code_snippet\""));
+    /* Verify sensitive parameter was redacted */
+    ASSERT_NOT_NULL(strstr(json, "[REDACTED]"));
+    ASSERT_NULL(strstr(json, "ghp_secret123"));
+    free(json);
+
+    /* Test filtering by status: ok */
+    char *ok_json = cbm_tool_call_log_to_json(50, 0, NULL, "ok");
+    ASSERT_NOT_NULL(ok_json);
+    ASSERT_NOT_NULL(strstr(ok_json, "\"total\":1"));
+    ASSERT_NOT_NULL(strstr(ok_json, "\"status\":\"ok\""));
+    ASSERT_NULL(strstr(ok_json, "\"get_code_snippet\""));
+    free(ok_json);
+
+    /* Test filtering by status: error */
+    char *err_json = cbm_tool_call_log_to_json(50, 0, NULL, "error");
+    ASSERT_NOT_NULL(err_json);
+    ASSERT_NOT_NULL(strstr(err_json, "\"total\":1"));
+    ASSERT_NOT_NULL(strstr(err_json, "\"status\":\"error\""));
+    ASSERT_NULL(strstr(err_json, "\"search_graph\""));
+    free(err_json);
+
+    /* Test filtering by tool name */
+    char *tool_json = cbm_tool_call_log_to_json(50, 0, "search_graph", "all");
+    ASSERT_NOT_NULL(tool_json);
+    ASSERT_NOT_NULL(strstr(tool_json, "\"total\":1"));
+    ASSERT_NOT_NULL(strstr(tool_json, "\"tool\":\"search_graph\""));
+    free(tool_json);
+
+    cbm_tool_call_log_clear();
+    PASS();
+}
+
 /* ── Suite ────────────────────────────────────────────────────── */
 
 SUITE(ui) {
@@ -886,4 +1024,10 @@ SUITE(ui) {
     RUN_TEST(layout_null_inputs);
     RUN_TEST(layout_dead_code_classification);
     RUN_TEST(layout_coincident_nodes_bounded);
+
+    /* Tool call log (RFC 009) */
+    RUN_TEST(tool_call_ring_record_and_retrieve);
+    RUN_TEST(tool_call_ring_overflow_wrap);
+    RUN_TEST(tool_call_param_truncation);
+    RUN_TEST(tool_call_http_endpoint);
 }

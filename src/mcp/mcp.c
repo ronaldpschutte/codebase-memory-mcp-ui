@@ -78,6 +78,7 @@ enum {
 #include "foundation/subprocess.h"
 #include "foundation/sha256.h"
 #include "mcp/index_supervisor.h"
+#include "ui/tool_call_log.h"
 #include "mcp/compact_out.h"
 #include "foundation/str_util.h"
 #include "foundation/workspace.h"
@@ -19932,6 +19933,9 @@ char *cbm_mcp_server_handle(cbm_mcp_server_t *srv, const char *line) {
                                    ((long long)(t1.tv_nsec - req_t0.tv_nsec) / MCP_MS_TO_US);
         cbm_log_mcp_request(req.method, tool_name, is_err, request_dur_us);
         request_logged = true;
+
+        size_t resp_len = result_json ? strlen(result_json) : 0;
+        cbm_tool_call_log_record(tool_name, tool_args, is_err, request_dur_us, resp_len);
 
         free(tool_name);
         free(tool_args);
