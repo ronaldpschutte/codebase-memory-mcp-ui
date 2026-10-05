@@ -1385,6 +1385,45 @@ int cbm_store_get_coupled_files(cbm_store_t *s, const char *project, const char 
                                 cbm_coupled_files_result_t **out);
 void cbm_store_coupled_files_result_free(cbm_coupled_files_result_t *res);
 
+/* ── Environment variable & configuration topology (RFC 006) ────── */
+
+typedef struct {
+    char *symbol;        /* qualified_name or name of consumer function/symbol */
+    char *file_path;     /* file where consumer is defined */
+    int line;            /* line number where consumed */
+} cbm_env_var_consumer_t;
+
+typedef struct {
+    char *name;                  /* variable name, e.g. "CBM_DB_PATH" */
+    char *detected_default;      /* detected default fallback value, or NULL */
+    bool is_required;            /* true if required / no fallback */
+    char **access_methods;       /* array of access methods, e.g. ["getenv"] */
+    int access_methods_count;
+    int consumers_count;
+    cbm_env_var_consumer_t *consumers;
+    char *description;           /* descriptive summary or NULL */
+} cbm_env_var_item_t;
+
+typedef struct {
+    char *project;
+    int total_env_vars;
+    cbm_env_var_item_t *env_vars;
+    int env_vars_count;
+    char *env_example_template;  /* generated .env.example content if requested */
+} cbm_get_env_vars_result_t;
+
+typedef struct {
+    char *name_pattern;          /* optional pattern/wildcard or NULL */
+    bool include_consumers;      /* default true */
+    bool generate_env_example;   /* default false */
+} cbm_get_env_vars_opts_t;
+
+int cbm_store_get_env_vars(cbm_store_t *s, const char *project,
+                           const cbm_get_env_vars_opts_t *opts,
+                           cbm_get_env_vars_result_t **out);
+void cbm_store_get_env_vars_result_free(cbm_get_env_vars_result_t *res);
+
 #endif /* CBM_STORE_H */
+
 
 

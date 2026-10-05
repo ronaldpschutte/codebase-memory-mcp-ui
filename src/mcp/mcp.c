@@ -893,6 +893,16 @@ static const tool_def_t TOOLS[] = {
      "\"min_confidence\":{\"type\":\"number\",\"default\":0.30,\"minimum\":0.10,\"maximum\":1.00,\"description\":\"Minimum co-change confidence threshold (0.10 to 1.00).\"},"
      "\"limit\":{\"type\":\"integer\",\"default\":10,\"minimum\":1,\"maximum\":50,\"description\":\"Maximum number of coupled companion files to return.\"}"
      "},\"required\":[\"project\",\"file_path\"]}"},
+
+    {"get_env_vars",
+     "Returns the environment variables and configuration parameters used by the project, "
+     "including where they are read in code, detected fallback defaults, and consuming modules.",
+     "{\"type\":\"object\",\"properties\":{"
+     "\"project\":{\"type\":\"string\",\"description\":\"Target project identifier registered in Codebase Memory.\"},"
+     "\"name_pattern\":{\"type\":\"string\",\"description\":\"Optional substring or regex to filter variable names (e.g. 'DB_*' or 'PORT').\"},"
+     "\"include_consumers\":{\"type\":\"boolean\",\"default\":true,\"description\":\"Include the list of functions and files that consume each environment variable.\"},"
+     "\"generate_env_example\":{\"type\":\"boolean\",\"default\":false,\"description\":\"If true, generates a ready-to-use .env.example template string.\"}"
+     "},\"required\":[\"project\"]}"},
 };
 
 static const int TOOL_COUNT = sizeof(TOOLS) / sizeof(TOOLS[0]);
@@ -929,6 +939,7 @@ static const tool_annotation_def_t TOOL_ANNOTATIONS[] = {
     {"audit_test_coverage", true, false, true, false},
     {"find_code_clones", true, false, true, false},
     {"get_coupled_files", true, false, true, false},
+    {"get_env_vars", true, false, true, false},
     {"get_code_snippet", true, false, true, false},
     {"get_file_outline", true, false, true, false},
     {"get_graph_schema", true, false, true, false},
@@ -9029,6 +9040,118 @@ static char *handle_get_coupled_files(cbm_mcp_server_t *srv, const char *args) {
     cbm_store_coupled_files_result_free(res);
     free(project);
     free(file_path);
+
+    char *mcp_res = cbm_mcp_text_result(json, false);
+    free(json);
+    return mcp_res;
+}
+
+static char *handle_get_env_vars(cbm_mcp_server_t *srv, const char *args) {
+    char *project = get_project_arg(args);
+    cbm_store_t *store = resolve_store(srv, project);
+    if (!store && srv && srv->store) {
+        store = srv->store;
+    }
+    REQUIRE_STORE(store, project);
+
+    char *not_indexed = verify_project_indexed(store, project);
+    if (not_indexed && srv && srv->store == store && cbm_store_count_nodes(store, project) > 0) {
+        free(not_indexed);
+        not_indexed = NULL;
+    }
+    if (not_indexed) {
+        free(project);
+        return not_indexed;
+    }
+
+    char *name_pattern = cbm_mcp_get_string_arg(args, "name_pattern");
+
+    bool include_consumers = true;
+    bool generate_env_example = cbm_mcp_get_bool_arg(args, "generate_env_example");
+
+    yyjson_doc *args_doc = args ? yyjson_read(args, strlen(args), 0) : NULL;
+    if (args_doc) {
+        yyjson_val *aroot = yyjson_doc_get_root(args_doc);
+        yyjson_val *ic = yyjson_obj_get(aroot, "include_consumers");
+        if (ic && yyjson_is_bool(ic)) {
+            include_consumers = yyjson_get_bool(ic);
+        }
+        yyjson_doc_free(args_doc);
+    }
+
+    cbm_get_env_vars_opts_t opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.name_pattern = name_pattern;
+    opts.include_consumers = include_consumers;
+    opts.generate_env_example = generate_env_example;
+
+    cbm_get_env_vars_result_t *res = NULL;
+    int rc = cbm_store_get_env_vars(store, project, &opts, &res);
+    if (rc != CBM_STORE_OK || !res) {
+        char err[CBM_SZ_512];
+        snprintf(err, sizeof(err), "failed to query environment variables for project '%s'",
+                 project ? project : "");
+        free(project);
+        free(name_pattern);
+        return cbm_mcp_text_result(err, true);
+    }
+
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+    yyjson_mut_val *root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
+
+    yyjson_mut_obj_add_str(doc, root, "project", res->project ? res->project : (project ? project : ""));
+    yyjson_mut_obj_add_int(doc, root, "total_env_vars", res->total_env_vars);
+
+    yyjson_mut_val *vars_arr = yyjson_mut_arr(doc);
+    for (int i = 0; i < res->env_vars_count; i++) {
+        cbm_env_var_item_t *item = &res->env_vars[i];
+        yyjson_mut_val *vobj = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_str(doc, vobj, "name", item->name ? item->name : "");
+        if (item->detected_default && item->detected_default[0] != '\0') {
+            yyjson_mut_obj_add_str(doc, vobj, "detected_default", item->detected_default);
+        } else {
+            yyjson_mut_obj_add_null(doc, vobj, "detected_default");
+        }
+        yyjson_mut_obj_add_bool(doc, vobj, "is_required", item->is_required);
+
+        yyjson_mut_val *marr = yyjson_mut_arr(doc);
+        for (int j = 0; j < item->access_methods_count; j++) {
+            yyjson_mut_arr_add_strcpy(doc, marr, item->access_methods[j]);
+        }
+        yyjson_mut_obj_add_val(doc, vobj, "access_methods", marr);
+
+        yyjson_mut_obj_add_int(doc, vobj, "consumers_count", item->consumers_count);
+
+        if (include_consumers) {
+            yyjson_mut_val *carr = yyjson_mut_arr(doc);
+            for (int j = 0; j < item->consumers_count; j++) {
+                cbm_env_var_consumer_t *c = &item->consumers[j];
+                yyjson_mut_val *cobj = yyjson_mut_obj(doc);
+                yyjson_mut_obj_add_str(doc, cobj, "symbol", c->symbol ? c->symbol : "");
+                yyjson_mut_obj_add_str(doc, cobj, "file_path", c->file_path ? c->file_path : "");
+                yyjson_mut_obj_add_int(doc, cobj, "line", c->line);
+                yyjson_mut_arr_add_val(carr, cobj);
+            }
+            yyjson_mut_obj_add_val(doc, vobj, "consumers", carr);
+        }
+
+        yyjson_mut_obj_add_strcpy(doc, vobj, "description", item->description ? item->description : "");
+
+        yyjson_mut_arr_add_val(vars_arr, vobj);
+    }
+    yyjson_mut_obj_add_val(doc, root, "env_vars", vars_arr);
+
+    if (res->env_example_template) {
+        yyjson_mut_obj_add_strcpy(doc, root, "env_example_template", res->env_example_template);
+    }
+
+    char *json = yy_doc_to_str(doc);
+    yyjson_mut_doc_free(doc);
+
+    cbm_store_get_env_vars_result_free(res);
+    free(project);
+    free(name_pattern);
 
     char *mcp_res = cbm_mcp_text_result(json, false);
     free(json);
@@ -19130,6 +19253,9 @@ static char *dispatch_tool(cbm_mcp_server_t *srv, const char *tool_name, const c
     }
     if (strcmp(tool_name, "get_coupled_files") == 0) {
         return handle_get_coupled_files(srv, args_json);
+    }
+    if (strcmp(tool_name, "get_env_vars") == 0) {
+        return handle_get_env_vars(srv, args_json);
     }
 
 
