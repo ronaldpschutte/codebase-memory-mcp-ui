@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen, waitFor, fireEvent, act } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ControlTab, parseElapsedSeconds } from "./ControlTab";
 import { messages } from "../lib/i18n";
 
@@ -28,9 +28,26 @@ describe("parseElapsedSeconds", () => {
 });
 
 describe("ControlTab", () => {
+  beforeEach(() => {
+    if (!globalThis.ResizeObserver) {
+      globalThis.ResizeObserver = class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      };
+    }
+  });
+
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    if (!globalThis.ResizeObserver) {
+      globalThis.ResizeObserver = class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      };
+    }
   });
 
   it("normalizes cumulative CPU seconds to realistic percentage", async () => {
@@ -258,6 +275,96 @@ describe("ControlTab", () => {
     await waitFor(() => {
       expect(screen.getByText("Copied!")).toBeInTheDocument();
     });
+  });
+
+  it("renders full response in a box underneath parameters and allows copying response", async () => {
+    const writeTextMock = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: writeTextMock,
+      },
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/api/tool-calls")) {
+          return new Response(
+            JSON.stringify({
+              total: 1,
+              latest_id: 105,
+              tool_calls: [
+                {
+                  id: 105,
+                  timestamp: "2026-10-04T19:55:00.123Z",
+                  timestamp_ms: 1791136500123,
+                  tool: "search_graph",
+                  project: "core-backend",
+                  duration_ms: 10.5,
+                  status: "ok",
+                  is_error: false,
+                  response_bytes: 512,
+                  params: {
+                    query: "PaymentService",
+                  },
+                  response: {
+                    content: [
+                      { type: "text", text: "Found PaymentService at src/payment.ts" },
+                    ],
+                  },
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response(JSON.stringify({ lines: [], processes: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      })
+    );
+
+    render(<ControlTab />);
+
+    await waitFor(() => {
+      expect(screen.getByText("search_graph")).toBeInTheDocument();
+    });
+
+    // Expand the row
+    const row = screen.getByText("search_graph");
+    await act(async () => {
+      fireEvent.click(row);
+    });
+
+    // Verify both Parameters and Response sections appear
+    await waitFor(() => {
+      expect(screen.getByText("Parameters")).toBeInTheDocument();
+      expect(screen.getByText("Response")).toBeInTheDocument();
+      expect(screen.getByText("Copy Parameters")).toBeInTheDocument();
+      expect(screen.getByText("Copy Response")).toBeInTheDocument();
+    });
+
+    // Verify Response box contains formatted response content
+    expect(screen.getByText(/Found PaymentService at src\/payment\.ts/)).toBeInTheDocument();
+
+    // Verify Parameters appears before Response in the DOM
+    const paramsHeading = screen.getByText("Parameters");
+    const responseHeading = screen.getByText("Response");
+    expect(
+      paramsHeading.compareDocumentPosition(responseHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+
+    // Click Copy Response
+    const copyResponseBtn = screen.getByText("Copy Response");
+    await act(async () => {
+      fireEvent.click(copyResponseBtn);
+    });
+
+    expect(writeTextMock).toHaveBeenCalled();
+    const copiedText = writeTextMock.mock.calls[0][0];
+    expect(copiedText).toContain("Found PaymentService at src/payment.ts");
   });
 
   it("filters tool calls by status pills", async () => {

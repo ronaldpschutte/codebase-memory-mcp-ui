@@ -869,7 +869,7 @@ TEST(tool_call_ring_record_and_retrieve) {
         char params[128];
         snprintf(params, sizeof(params), "{\"project\":\"p%d\",\"index\":%d}", i, i);
         cbm_tool_call_log_record(i % 2 == 0 ? "search_graph" : "analyze_blast_radius",
-                                 params, (i % 3 == 0), (int64_t)(1000 + i * 100), 200 + i * 10);
+                                 params, "{\"status\":\"ok\"}", (i % 3 == 0), (int64_t)(1000 + i * 100), 200 + i * 10);
     }
 
     cbm_tool_call_record_t records[15];
@@ -879,6 +879,8 @@ TEST(tool_call_ring_record_and_retrieve) {
     for (int i = 0; i < n; i++) {
         ASSERT_NOT_NULL(records[i].params_json);
         ASSERT_NOT_NULL(strstr(records[i].params_json, "index"));
+        ASSERT_NOT_NULL(records[i].response_json);
+        ASSERT_NOT_NULL(strstr(records[i].response_json, "status"));
         if (i % 2 == 0) {
             ASSERT_STR_EQ(records[i].tool_name, "search_graph");
         } else {
@@ -886,6 +888,9 @@ TEST(tool_call_ring_record_and_retrieve) {
         }
         ASSERT_EQ(records[i].is_error, (i % 3 == 0));
         free(records[i].params_json);
+        if (records[i].response_json) {
+            free(records[i].response_json);
+        }
     }
 
     int cleared = cbm_tool_call_log_clear();
@@ -903,7 +908,7 @@ TEST(tool_call_ring_overflow_wrap) {
     for (int i = 1; i <= 600; i++) {
         char params[128];
         snprintf(params, sizeof(params), "{\"id\":%d,\"name\":\"item_%d\"}", i, i);
-        cbm_tool_call_log_record("search_graph", params, false, 500, 100);
+        cbm_tool_call_log_record("search_graph", params, NULL, false, 500, 100);
     }
 
     cbm_tool_call_record_t records[600];
@@ -917,6 +922,9 @@ TEST(tool_call_ring_overflow_wrap) {
 
     for (int i = 0; i < n; i++) {
         free(records[i].params_json);
+        if (records[i].response_json) {
+            free(records[i].response_json);
+        }
     }
 
     cbm_tool_call_log_clear();
@@ -933,7 +941,7 @@ TEST(tool_call_param_truncation) {
     memset(big_buf, 'x', big_sz - 1);
     big_buf[big_sz - 1] = '\0';
 
-    cbm_tool_call_log_record("get_code_snippet", big_buf, false, 1200, 50);
+    cbm_tool_call_log_record("get_code_snippet", big_buf, NULL, false, 1200, 50);
     free(big_buf);
 
     cbm_tool_call_record_t records[2];
@@ -944,6 +952,9 @@ TEST(tool_call_param_truncation) {
     ASSERT_NOT_NULL(strstr(records[0].params_json, "(truncated)"));
 
     free(records[0].params_json);
+    if (records[0].response_json) {
+        free(records[0].response_json);
+    }
     cbm_tool_call_log_clear();
     PASS();
 }
@@ -953,9 +964,11 @@ TEST(tool_call_http_endpoint) {
 
     /* Record entry with sensitive tokens */
     cbm_tool_call_log_record("search_graph", "{\"project\":\"alpha\",\"token\":\"ghp_secret123\"}",
+                             "{\"content\":[{\"type\":\"text\",\"text\":\"hello\"}]}",
                              false, 15000, 1234);
     /* Record error entry */
     cbm_tool_call_log_record("get_code_snippet", "{\"project\":\"alpha\",\"symbol\":\"missing\"}",
+                             "{\"error\":\"not found\"}",
                              true, 2500, 50);
 
     /* Test full JSON output */
@@ -965,6 +978,7 @@ TEST(tool_call_http_endpoint) {
     ASSERT_NOT_NULL(strstr(json, "\"latest_id\":"));
     ASSERT_NOT_NULL(strstr(json, "\"tool\":\"search_graph\""));
     ASSERT_NOT_NULL(strstr(json, "\"tool\":\"get_code_snippet\""));
+    ASSERT_NOT_NULL(strstr(json, "\"response\":"));
     /* Verify sensitive parameter was redacted */
     ASSERT_NOT_NULL(strstr(json, "[REDACTED]"));
     ASSERT_NULL(strstr(json, "ghp_secret123"));

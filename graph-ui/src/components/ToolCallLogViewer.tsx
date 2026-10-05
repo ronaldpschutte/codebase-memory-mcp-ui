@@ -76,6 +76,7 @@ export function ToolCallLogViewer() {
   const [isPaused, setIsPaused] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [copiedResponseId, setCopiedResponseId] = useState<number | null>(null);
 
   const fetchToolCalls = useCallback(async () => {
     try {
@@ -117,6 +118,25 @@ export function ToolCallLogViewer() {
     setCopiedId(id);
     setTimeout(() => {
       setCopiedId((prev) => (prev === id ? null : prev));
+    }, 2000);
+  };
+
+  const handleCopyResponse = (id: number, response: unknown) => {
+    let text = "";
+    if (response !== null && response !== undefined) {
+      if (typeof response === "string") {
+        text = response;
+      } else {
+        const masked = maskSensitiveParams(response);
+        text = JSON.stringify(masked, null, 2);
+      }
+    }
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(text);
+    }
+    setCopiedResponseId(id);
+    setTimeout(() => {
+      setCopiedResponseId((prev) => (prev === id ? null : prev));
     }, 2000);
   };
 
@@ -235,7 +255,7 @@ export function ToolCallLogViewer() {
       </div>
 
       {/* Calls List */}
-      <ScrollArea className="max-h-[460px]">
+      <ScrollArea type="always" className="h-[440px]">
         <div className="divide-y divide-border/10">
           {filteredCalls.length === 0 ? (
             <div className="py-12 text-center">
@@ -314,39 +334,82 @@ export function ToolCallLogViewer() {
 
                   {/* Expanded Accordion Details */}
                   {isExpanded && (
-                    <div className="px-4 pb-3 pt-1 border-t border-border/10 bg-black/40">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2 text-[10px] text-foreground/40 font-mono">
-                          <span>{t.control.params}</span>
-                          <span>•</span>
-                          <span>{call.response_bytes ?? 0} bytes response</span>
-                          {call.project && (
-                            <>
-                              <span>•</span>
-                              <span>project: {call.project}</span>
-                            </>
+                    <div className="px-4 pb-4 pt-2 border-t border-border/10 bg-black/40 space-y-3">
+                      {/* Parameters Section */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <div className="flex items-center gap-2 text-[10px] text-foreground/50 font-mono">
+                            <span className="font-semibold text-foreground/75 uppercase tracking-wider text-[9px]">{t.control.params}</span>
+                            {call.project && (
+                              <>
+                                <span>•</span>
+                                <span>project: {call.project}</span>
+                              </>
+                            )}
+                          </div>
+
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCopyParams(call.id, call.params ?? {});
+                            }}
+                            className={`text-[10px] px-2.5 py-0.5 rounded font-medium transition-all ${
+                              isCopied
+                                ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                                : "bg-white/[0.05] hover:bg-white/[0.1] text-foreground/70 hover:text-foreground"
+                            }`}
+                          >
+                            {isCopied ? t.control.copied : t.control.copyParams}
+                          </button>
+                        </div>
+
+                        {/* JSON Parameters viewer */}
+                        <pre className="bg-black/60 border border-white/[0.06] rounded-lg p-3 font-mono text-[11px] text-foreground/80 overflow-x-auto leading-relaxed max-h-[220px]">
+                          {JSON.stringify(maskSensitiveParams(call.params ?? {}), null, 2)}
+                        </pre>
+                      </div>
+
+                      {/* Full Response Section (underneath parameters) */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <div className="flex items-center gap-2 text-[10px] text-foreground/50 font-mono">
+                            <span className="font-semibold text-foreground/75 uppercase tracking-wider text-[9px]">{t.control.response}</span>
+                            <span>•</span>
+                            <span>{call.response_bytes ?? 0} bytes</span>
+                            {call.is_error && (
+                              <>
+                                <span>•</span>
+                                <span className="text-red-400 font-semibold">ERROR</span>
+                              </>
+                            )}
+                          </div>
+
+                          {call.response !== undefined && call.response !== null && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCopyResponse(call.id, call.response);
+                              }}
+                              className={`text-[10px] px-2.5 py-0.5 rounded font-medium transition-all ${
+                                copiedResponseId === call.id
+                                  ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                                  : "bg-white/[0.05] hover:bg-white/[0.1] text-foreground/70 hover:text-foreground"
+                              }`}
+                            >
+                              {copiedResponseId === call.id ? t.control.copied : t.control.copyResponse}
+                            </button>
                           )}
                         </div>
 
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleCopyParams(call.id, call.params ?? {});
-                          }}
-                          className={`text-[10px] px-2.5 py-1 rounded font-medium transition-all ${
-                            isCopied
-                              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
-                              : "bg-white/[0.05] hover:bg-white/[0.1] text-foreground/70 hover:text-foreground"
-                          }`}
-                        >
-                          {isCopied ? t.control.copied : t.control.copyParams}
-                        </button>
+                        {/* Response viewer */}
+                        <pre className="bg-black/60 border border-white/[0.06] rounded-lg p-3 font-mono text-[11px] text-foreground/80 overflow-x-auto leading-relaxed max-h-[300px]">
+                          {call.response !== undefined && call.response !== null
+                            ? typeof call.response === "string"
+                              ? call.response
+                              : JSON.stringify(maskSensitiveParams(call.response), null, 2)
+                            : `(${call.response_bytes ?? 0} bytes response recorded)`}
+                        </pre>
                       </div>
-
-                      {/* JSON Parameters viewer */}
-                      <pre className="bg-black/60 border border-white/[0.06] rounded-lg p-3 font-mono text-[11px] text-foreground/80 overflow-x-auto leading-relaxed max-h-[300px]">
-                        {JSON.stringify(maskSensitiveParams(call.params ?? {}), null, 2)}
-                      </pre>
                     </div>
                   )}
                 </div>

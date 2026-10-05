@@ -125,4 +125,5 @@ export interface ToolCallRecord {
   is_error: boolean;
   response_bytes: number;
   params: Record<string, unknown>;
+  response?: unknown;
 }

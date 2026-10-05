@@ -27,7 +27,7 @@ if (-not $SkipBuild) {
     Write-Host "[1/4] Building Windows native binary via WSL (MinGW 64-bit)..." -ForegroundColor Yellow
     Push-Location $RepoRoot
     try {
-        & wsl.exe make -j8 -f Makefile.cbm BUILD_DIR=build/win64 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ CFLAGS_EXTRA="-I/usr/x86_64-w64-mingw32/include" cbm
+        & wsl.exe make -j8 -f Makefile.cbm BUILD_DIR=build/win64 CC=x86_64-w64-mingw32-gcc CXX=x86_64-w64-mingw32-g++ CFLAGS_EXTRA="-I/usr/x86_64-w64-mingw32/include" cbm-with-ui
         if ($LASTEXITCODE -ne 0) {
             Write-Error "Build failed inside WSL with exit code $LASTEXITCODE."
             exit $LASTEXITCODE

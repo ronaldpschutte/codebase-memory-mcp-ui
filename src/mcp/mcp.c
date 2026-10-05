@@ -19935,7 +19935,7 @@ char *cbm_mcp_server_handle(cbm_mcp_server_t *srv, const char *line) {
         request_logged = true;
 
         size_t resp_len = result_json ? strlen(result_json) : 0;
-        cbm_tool_call_log_record(tool_name, tool_args, is_err, request_dur_us, resp_len);
+        cbm_tool_call_log_record(tool_name, tool_args, result_json, is_err, request_dur_us, resp_len);
 
         free(tool_name);
         free(tool_args);

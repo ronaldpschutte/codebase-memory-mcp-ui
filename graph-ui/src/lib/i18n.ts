@@ -87,6 +87,8 @@ export const messages = {
       resumePolling: "Resume Live Updates",
       duration: "Duration",
       params: "Parameters",
+      response: "Response",
+      copyResponse: "Copy Response",
     },
   },
   zh: {
@@ -173,6 +175,8 @@ export const messages = {
       resumePolling: "恢复实时更新",
       duration: "耗时",
       params: "参数",
+      response: "响应",
+      copyResponse: "复制响应",
     },
   },
 } as const;

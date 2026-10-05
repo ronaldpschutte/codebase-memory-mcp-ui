@@ -21,7 +21,7 @@ mkdir -p "$OUTPUT_DIR"
 
 # Detect platform — Linux uses ld -r -b binary, everything else uses xxd+cc
 IS_LINUX=false
-if [[ "$(uname -s)" == "Linux" ]] && ! [[ "$(uname -s)" =~ MINGW|MSYS ]]; then
+if [[ "$(uname -s)" == "Linux" ]] && ! [[ "$(uname -s)" =~ MINGW|MSYS ]] && ! [[ "${CC:-}" =~ mingw|w64 ]]; then
     IS_LINUX=true
 fi
 
