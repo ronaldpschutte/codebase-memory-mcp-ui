@@ -1438,6 +1438,7 @@ TEST(mcp_tools_have_behavior_annotations) {
         {"get_coupled_files", true, false, true, false},
         {"get_env_vars", true, false, true, false},
         {"find_dead_code", true, false, true, false},
+        {"trace_error_flow", true, false, true, false},
     };
 
     char *json = cbm_mcp_tools_list();
@@ -23696,6 +23697,270 @@ TEST(tool_find_dead_code_filters) {
     PASS();
 }
 
+TEST(tool_trace_error_flow_direct) {
+    const char *project = "test-error-direct";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-error-direct"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    /* 1. Throwing function */
+    cbm_node_t n_fn = {0};
+    n_fn.project = project;
+    n_fn.label = "Function";
+    n_fn.name = "validate_user";
+    n_fn.qualified_name = "src.api.validate_user";
+    n_fn.file_path = "src/api/user.c";
+    n_fn.start_line = 42;
+    n_fn.end_line = 60;
+    int64_t fn_id = cbm_store_upsert_node(st, &n_fn);
+    ASSERT_GT(fn_id, 0);
+
+    /* 2. Error class node */
+    cbm_node_t n_err = {0};
+    n_err.project = project;
+    n_err.label = "Class";
+    n_err.name = "ValidationException";
+    n_err.qualified_name = "src.errors.ValidationException";
+    n_err.file_path = "src/errors/errors.c";
+    n_err.start_line = 1;
+    n_err.end_line = 10;
+    int64_t err_id = cbm_store_upsert_node(st, &n_err);
+    ASSERT_GT(err_id, 0);
+
+    /* 3. THROWS edge */
+    cbm_edge_t e_throw = {0};
+    e_throw.project = project;
+    e_throw.source_id = fn_id;
+    e_throw.target_id = err_id;
+    e_throw.type = "THROWS";
+    e_throw.properties_json = "{}";
+    ASSERT_GT(cbm_store_insert_edge(st, &e_throw), 0);
+
+    char *resp = cbm_mcp_handle_tool(
+        srv, "trace_error_flow",
+        "{\"project\":\"test-error-direct\",\"target\":\"validate_user\"}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NULL(strstr(resp, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "\"total_exceptions_detected\":1"));
+    ASSERT_NOT_NULL(strstr(resp, "\"error_type\":\"ValidationException\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"call_distance\":0"));
+    ASSERT_NOT_NULL(strstr(resp, "\"call_path\":\"validate_user\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"origin_symbol\":\"src.api.validate_user\""));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_trace_error_flow_transitive) {
+    const char *project = "test-error-transitive";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-error-transitive"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    /* Route handler (depth 0) */
+    cbm_node_t n_handler = {0};
+    n_handler.project = project;
+    n_handler.label = "Function";
+    n_handler.name = "handle_checkout";
+    n_handler.qualified_name = "src.api.handle_checkout";
+    n_handler.file_path = "src/api/checkout.c";
+    n_handler.start_line = 100;
+    n_handler.end_line = 130;
+    int64_t hid = cbm_store_upsert_node(st, &n_handler);
+    ASSERT_GT(hid, 0);
+
+    /* Hop 1: service */
+    cbm_node_t n_svc = {0};
+    n_svc.project = project;
+    n_svc.label = "Function";
+    n_svc.name = "process_payment";
+    n_svc.qualified_name = "src.service.process_payment";
+    n_svc.file_path = "src/service/payment.c";
+    n_svc.start_line = 10;
+    n_svc.end_line = 50;
+    int64_t sid = cbm_store_upsert_node(st, &n_svc);
+    ASSERT_GT(sid, 0);
+
+    /* Hop 2: repo */
+    cbm_node_t n_repo = {0};
+    n_repo.project = project;
+    n_repo.label = "Function";
+    n_repo.name = "charge_card";
+    n_repo.qualified_name = "src.repo.charge_card";
+    n_repo.file_path = "src/repo/card.c";
+    n_repo.start_line = 15;
+    n_repo.end_line = 40;
+    int64_t rid = cbm_store_upsert_node(st, &n_repo);
+    ASSERT_GT(rid, 0);
+
+    /* Hop 3: driver */
+    cbm_node_t n_driver = {0};
+    n_driver.project = project;
+    n_driver.label = "Function";
+    n_driver.name = "send_http_request";
+    n_driver.qualified_name = "src.driver.send_http_request";
+    n_driver.file_path = "src/driver/http.c";
+    n_driver.start_line = 20;
+    n_driver.end_line = 70;
+    int64_t did = cbm_store_upsert_node(st, &n_driver);
+    ASSERT_GT(did, 0);
+
+    /* Error node */
+    cbm_node_t n_err = {0};
+    n_err.project = project;
+    n_err.label = "Class";
+    n_err.name = "PaymentGatewayTimeout";
+    n_err.qualified_name = "src.errors.PaymentGatewayTimeout";
+    n_err.file_path = "src/errors/errors.c";
+    n_err.start_line = 1;
+    n_err.end_line = 10;
+    int64_t eid = cbm_store_upsert_node(st, &n_err);
+    ASSERT_GT(eid, 0);
+
+    /* CALLS edges: hid -> sid -> rid -> did */
+    cbm_edge_t e1 = {.project = project, .source_id = hid, .target_id = sid, .type = "CALLS"};
+    ASSERT_GT(cbm_store_insert_edge(st, &e1), 0);
+    cbm_edge_t e2 = {.project = project, .source_id = sid, .target_id = rid, .type = "CALLS"};
+    ASSERT_GT(cbm_store_insert_edge(st, &e2), 0);
+    cbm_edge_t e3 = {.project = project, .source_id = rid, .target_id = did, .type = "CALLS"};
+    ASSERT_GT(cbm_store_insert_edge(st, &e3), 0);
+
+    /* did RAISES eid */
+    cbm_edge_t e4 = {.project = project, .source_id = did, .target_id = eid, .type = "RAISES", .properties_json = "{}"};
+    ASSERT_GT(cbm_store_insert_edge(st, &e4), 0);
+
+    char *resp = cbm_mcp_handle_tool(
+        srv, "trace_error_flow",
+        "{\"project\":\"test-error-transitive\",\"target\":\"handle_checkout\",\"max_depth\":4}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NULL(strstr(resp, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "\"total_exceptions_detected\":1"));
+    ASSERT_NOT_NULL(strstr(resp, "\"call_distance\":3"));
+    ASSERT_NOT_NULL(strstr(resp, "\"call_path\":\"handle_checkout -> process_payment -> charge_card -> send_http_request\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"error_type\":\"PaymentGatewayTimeout\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"origin_symbol\":\"src.driver.send_http_request\""));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_trace_error_flow_cycle) {
+    const char *project = "test-error-cycle";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-error-cycle"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    /* func_a calls func_b, func_b calls func_a */
+    cbm_node_t n_a = {.project = project, .label = "Function", .name = "cycle_a", .qualified_name = "src.cycle.cycle_a", .file_path = "a.c", .start_line = 1, .end_line = 10};
+    int64_t aid = cbm_store_upsert_node(st, &n_a);
+    cbm_node_t n_b = {.project = project, .label = "Function", .name = "cycle_b", .qualified_name = "src.cycle.cycle_b", .file_path = "b.c", .start_line = 1, .end_line = 10};
+    int64_t bid = cbm_store_upsert_node(st, &n_b);
+    cbm_node_t n_leaf = {.project = project, .label = "Function", .name = "cycle_leaf", .qualified_name = "src.cycle.cycle_leaf", .file_path = "leaf.c", .start_line = 1, .end_line = 10};
+    int64_t lid = cbm_store_upsert_node(st, &n_leaf);
+
+    cbm_node_t n_err = {.project = project, .label = "Class", .name = "CycleError", .qualified_name = "src.cycle.CycleError", .file_path = "err.c", .start_line = 1, .end_line = 5};
+    int64_t eid = cbm_store_upsert_node(st, &n_err);
+
+    cbm_edge_t ea = {.project = project, .source_id = aid, .target_id = bid, .type = "CALLS"};
+    ASSERT_GT(cbm_store_insert_edge(st, &ea), 0);
+    cbm_edge_t eb = {.project = project, .source_id = bid, .target_id = aid, .type = "CALLS"};
+    ASSERT_GT(cbm_store_insert_edge(st, &eb), 0);
+    cbm_edge_t el = {.project = project, .source_id = bid, .target_id = lid, .type = "CALLS"};
+    ASSERT_GT(cbm_store_insert_edge(st, &el), 0);
+
+    cbm_edge_t ee = {.project = project, .source_id = lid, .target_id = eid, .type = "THROWS", .properties_json = "{}"};
+    ASSERT_GT(cbm_store_insert_edge(st, &ee), 0);
+
+    char *resp = cbm_mcp_handle_tool(
+        srv, "trace_error_flow",
+        "{\"project\":\"test-error-cycle\",\"target\":\"cycle_a\",\"max_depth\":5}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NULL(strstr(resp, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "\"total_exceptions_detected\":1"));
+    ASSERT_NOT_NULL(strstr(resp, "\"error_type\":\"CycleError\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"call_distance\":2"));
+    ASSERT_NOT_NULL(strstr(resp, "\"call_path\":\"cycle_a -> cycle_b -> cycle_leaf\""));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_trace_error_flow_unhandled_filter) {
+    const char *project = "test-error-filter";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-error-filter"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    /* Target: worker_dispatch */
+    cbm_node_t n_target = {.project = project, .label = "Function", .name = "worker_dispatch", .qualified_name = "src.worker.dispatch", .file_path = "w.c", .start_line = 1, .end_line = 20};
+    int64_t tid = cbm_store_upsert_node(st, &n_target);
+
+    /* Callee 1: handled callee */
+    cbm_node_t n_c1 = {.project = project, .label = "Function", .name = "parse_payload", .qualified_name = "src.worker.parse_payload", .file_path = "p.c", .start_line = 1, .end_line = 20};
+    int64_t c1id = cbm_store_upsert_node(st, &n_c1);
+    cbm_node_t e_h = {.project = project, .label = "Class", .name = "HandledJsonError", .qualified_name = "src.errors.HandledJsonError", .file_path = "e.c", .start_line = 1, .end_line = 5};
+    int64_t ehid = cbm_store_upsert_node(st, &e_h);
+
+    /* Callee 2: unhandled callee */
+    cbm_node_t n_c2 = {.project = project, .label = "Function", .name = "exec_query", .qualified_name = "src.worker.exec_query", .file_path = "q.c", .start_line = 1, .end_line = 20};
+    int64_t c2id = cbm_store_upsert_node(st, &n_c2);
+    cbm_node_t e_u = {.project = project, .label = "Class", .name = "FatalDatabaseError", .qualified_name = "src.errors.FatalDatabaseError", .file_path = "e.c", .start_line = 1, .end_line = 5};
+    int64_t euid = cbm_store_upsert_node(st, &e_u);
+
+    cbm_edge_t ec1 = {.project = project, .source_id = tid, .target_id = c1id, .type = "CALLS"};
+    ASSERT_GT(cbm_store_insert_edge(st, &ec1), 0);
+    cbm_edge_t ec2 = {.project = project, .source_id = tid, .target_id = c2id, .type = "CALLS"};
+    ASSERT_GT(cbm_store_insert_edge(st, &ec2), 0);
+
+    /* Handled edge (properties specify status: HANDLED) */
+    cbm_edge_t eh_edge = {.project = project, .source_id = c1id, .target_id = ehid, .type = "THROWS", .properties_json = "{\"status\":\"HANDLED\",\"handling_block\":\"w.c:15 (caught and logged)\"}"};
+    ASSERT_GT(cbm_store_insert_edge(st, &eh_edge), 0);
+
+    /* Unhandled edge */
+    cbm_edge_t eu_edge = {.project = project, .source_id = c2id, .target_id = euid, .type = "THROWS", .properties_json = "{\"status\":\"UNHANDLED\"}"};
+    ASSERT_GT(cbm_store_insert_edge(st, &eu_edge), 0);
+
+    /* 1. unhandled_only = false: returns both */
+    char *resp_all = cbm_mcp_handle_tool(
+        srv, "trace_error_flow",
+        "{\"project\":\"test-error-filter\",\"target\":\"worker_dispatch\",\"unhandled_only\":false}");
+    ASSERT_NOT_NULL(resp_all);
+    ASSERT_NOT_NULL(strstr(resp_all, "\"total_exceptions_detected\":2"));
+    ASSERT_NOT_NULL(strstr(resp_all, "\"HandledJsonError\""));
+    ASSERT_NOT_NULL(strstr(resp_all, "\"FatalDatabaseError\""));
+    ASSERT_NOT_NULL(strstr(resp_all, "\"status\":\"HANDLED\""));
+    ASSERT_NOT_NULL(strstr(resp_all, "\"status\":\"UNHANDLED\""));
+    free(resp_all);
+
+    /* 2. unhandled_only = true: returns only FatalDatabaseError */
+    char *resp_unhandled = cbm_mcp_handle_tool(
+        srv, "trace_error_flow",
+        "{\"project\":\"test-error-filter\",\"target\":\"worker_dispatch\",\"unhandled_only\":true}");
+    ASSERT_NOT_NULL(resp_unhandled);
+    ASSERT_NOT_NULL(strstr(resp_unhandled, "\"total_exceptions_detected\":1"));
+    ASSERT_NOT_NULL(strstr(resp_unhandled, "\"FatalDatabaseError\""));
+    ASSERT_NULL(strstr(resp_unhandled, "\"HandledJsonError\""));
+    free(resp_unhandled);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
 TEST(tool_trace_cursor_truncated_after_leg_is_rejected) {
     cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
     ASSERT_NOT_NULL(srv);
@@ -23795,6 +24060,10 @@ SUITE(mcp) {
     RUN_TEST(tool_find_dead_code_preserves_entrypoints);
     RUN_TEST(tool_find_dead_code_preserves_routes);
     RUN_TEST(tool_find_dead_code_filters);
+    RUN_TEST(tool_trace_error_flow_direct);
+    RUN_TEST(tool_trace_error_flow_transitive);
+    RUN_TEST(tool_trace_error_flow_cycle);
+    RUN_TEST(tool_trace_error_flow_unhandled_filter);
     RUN_TEST(index_repository_async_and_status_refused_without_daemon_issue2144);
     RUN_TEST(index_repository_schema_documents_async_polling_issue2144);
     RUN_TEST(tool_result_add_notice_keeps_payload_shape_issue2144);

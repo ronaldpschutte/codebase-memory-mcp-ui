@@ -12721,6 +12721,356 @@ int cbm_store_find_dead_code(cbm_store_t *s, const char *project,
     return CBM_STORE_OK;
 }
 
+/* ── Error & exception propagation flow analyzer (RFC 008) ──────── */
 
+void cbm_store_trace_error_flow_result_free(cbm_trace_error_flow_result_t *res) {
+    if (!res) return;
+    free(res->project);
+    free(res->target);
+    free(res->file_path);
+    if (res->propagating_errors) {
+        for (int i = 0; i < res->propagating_errors_count; i++) {
+            cbm_error_flow_item_t *item = &res->propagating_errors[i];
+            free(item->error_type);
+            free(item->origin_symbol);
+            free(item->origin_file);
+            free(item->call_path);
+            free(item->status);
+            free(item->handling_block);
+            free(item->risk);
+            free(item->recommendation);
+        }
+        free(res->propagating_errors);
+    }
+    free(res);
+}
 
+int cbm_store_trace_error_flow(cbm_store_t *s, const char *project, const char *target,
+                               const cbm_trace_error_flow_opts_t *opts,
+                               cbm_trace_error_flow_result_t **out) {
+    if (!out) return CBM_STORE_ERR;
+    *out = NULL;
+    if (!s || !s->db || !project || project[0] == '\0' || !target || target[0] == '\0') {
+        return CBM_STORE_ERR;
+    }
 
+    int max_depth = opts ? opts->max_depth : 4;
+    if (max_depth < 1) max_depth = 1;
+    if (max_depth > 8) max_depth = 8;
+    bool unhandled_only = opts ? opts->unhandled_only : false;
+
+    /* 1. Resolve starting target node */
+    const char *resolve_sql =
+        "SELECT id, name, qualified_name, label, file_path, start_line, end_line, properties "
+        "FROM nodes "
+        "WHERE project = ?1 AND ("
+        "  qualified_name = ?2 "
+        "  OR name = ?2 "
+        "  OR file_path = ?2 "
+        "  OR (label = 'Route' AND json_extract(properties, '$.url_path') = ?2) "
+        "  OR (label = 'Route' AND json_extract(properties, '$.url_path') LIKE '%' || ?2) "
+        ") "
+        "ORDER BY (qualified_name = ?2) DESC, (name = ?2) DESC, (label = 'Route') DESC "
+        "LIMIT 1;";
+
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(s->db, resolve_sql, -1, &stmt, NULL) != SQLITE_OK) {
+        return CBM_STORE_ERR;
+    }
+    sqlite3_bind_text(stmt, 1, project, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, target, -1, SQLITE_STATIC);
+
+    if (sqlite3_step(stmt) != SQLITE_ROW) {
+        sqlite3_finalize(stmt);
+        return CBM_STORE_NOT_FOUND;
+    }
+
+    int64_t target_id = sqlite3_column_int64(stmt, 0);
+    const char *t_name = (const char *)sqlite3_column_text(stmt, 1);
+    const char *t_qn = (const char *)sqlite3_column_text(stmt, 2);
+    const char *t_file = (const char *)sqlite3_column_text(stmt, 4);
+    int t_start = sqlite3_column_int(stmt, 5);
+
+    cbm_trace_error_flow_result_t *res = calloc(1, sizeof(*res));
+    if (!res) {
+        sqlite3_finalize(stmt);
+        return CBM_STORE_ERR;
+    }
+    res->project = strdup(project);
+    res->target = strdup(t_qn ? t_qn : (t_name ? t_name : target));
+    res->file_path = strdup(t_file ? t_file : "");
+    res->line = t_start > 0 ? t_start : 1;
+    res->max_depth_searched = max_depth;
+    sqlite3_finalize(stmt);
+
+    /* 2. Recursive downstream error collector via CTE */
+    const char *downstream_sql =
+        "WITH RECURSIVE downstream(node_id, depth, id_path, name_path) AS ("
+        "    SELECT n.id, 0, ',' || CAST(n.id AS TEXT) || ',', COALESCE(n.name, '') "
+        "    FROM nodes n WHERE n.id = ?1 "
+        "    UNION "
+        "    SELECT e.target_id, d.depth + 1, d.id_path || CAST(e.target_id AS TEXT) || ',', "
+        "           d.name_path || ' -> ' || COALESCE(tgt.name, CAST(e.target_id AS TEXT)) "
+        "    FROM edges e "
+        "    JOIN downstream d ON e.source_id = d.node_id "
+        "    JOIN nodes tgt ON e.target_id = tgt.id "
+        "    WHERE e.project = ?2 "
+        "      AND e.type IN ('CALLS', 'CALLS_METHOD', 'HANDLES') "
+        "      AND d.depth < ?3 "
+        "      AND instr(d.id_path, ',' || CAST(e.target_id AS TEXT) || ',') = 0 "
+        ") "
+        "SELECT "
+        "    d.depth, "
+        "    d.name_path, "
+        "    origin.name AS origin_name, "
+        "    origin.qualified_name AS origin_symbol, "
+        "    origin.file_path AS origin_file, "
+        "    origin.start_line AS origin_line, "
+        "    origin.properties AS origin_props, "
+        "    e_err.type AS edge_type, "
+        "    e_err.properties AS edge_props, "
+        "    COALESCE(err_node.name, json_extract(e_err.properties, '$.error_type'), json_extract(e_err.properties, '$.exception_name'), 'Error') AS error_type, "
+        "    err_node.properties AS error_props "
+        "FROM downstream d "
+        "JOIN edges e_err ON (e_err.source_id = d.node_id AND e_err.type IN ('THROWS', 'RAISES')) "
+        "LEFT JOIN nodes err_node ON e_err.target_id = err_node.id "
+        "JOIN nodes origin ON d.node_id = origin.id "
+        "WHERE e_err.project = ?2 "
+        "ORDER BY d.depth ASC, origin.name ASC;";
+
+    if (sqlite3_prepare_v2(s->db, downstream_sql, -1, &stmt, NULL) != SQLITE_OK) {
+        cbm_store_trace_error_flow_result_free(res);
+        return CBM_STORE_ERR;
+    }
+    sqlite3_bind_int64(stmt, 1, target_id);
+    sqlite3_bind_text(stmt, 2, project, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 3, max_depth);
+
+    int cap = 16;
+    res->propagating_errors = calloc((size_t)cap, sizeof(cbm_error_flow_item_t));
+    if (!res->propagating_errors) {
+        sqlite3_finalize(stmt);
+        cbm_store_trace_error_flow_result_free(res);
+        return CBM_STORE_ERR;
+    }
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        int call_distance = sqlite3_column_int(stmt, 0);
+        const char *call_path = (const char *)sqlite3_column_text(stmt, 1);
+        const char *orig_name = (const char *)sqlite3_column_text(stmt, 2);
+        const char *orig_qn = (const char *)sqlite3_column_text(stmt, 3);
+        const char *orig_file = (const char *)sqlite3_column_text(stmt, 4);
+        int orig_line = sqlite3_column_int(stmt, 5);
+        const char *orig_props = (const char *)sqlite3_column_text(stmt, 6);
+        const char *edge_type = (const char *)sqlite3_column_text(stmt, 7);
+        const char *edge_props = (const char *)sqlite3_column_text(stmt, 8);
+        const char *err_type = (const char *)sqlite3_column_text(stmt, 9);
+        const char *err_props = (const char *)sqlite3_column_text(stmt, 10);
+        (void)edge_type;
+
+        const char *status_str = "UNHANDLED";
+        char handling_block_buf[CBM_SZ_512] = "";
+        bool is_handled = false;
+
+        /* Check edge_props */
+        if (edge_props && edge_props[0] != '\0') {
+            if (strstr(edge_props, "\"status\":\"HANDLED\"") || strstr(edge_props, "\"status\": \"HANDLED\"") ||
+                strstr(edge_props, "\"handled\":true") || strstr(edge_props, "\"handled\": true") ||
+                strstr(edge_props, "\"is_handled\":true")) {
+                is_handled = true;
+            } else if (strstr(edge_props, "\"status\":\"UNHANDLED\"") || strstr(edge_props, "\"status\": \"UNHANDLED\"") ||
+                       strstr(edge_props, "\"handled\":false") || strstr(edge_props, "\"handled\": false")) {
+                is_handled = false;
+            }
+        }
+        /* Check err_props */
+        if (!is_handled && err_props && err_props[0] != '\0') {
+            if (strstr(err_props, "\"status\":\"HANDLED\"") || strstr(err_props, "\"status\": \"HANDLED\"") ||
+                strstr(err_props, "\"handled\":true") || strstr(err_props, "\"handled\": true") ||
+                strstr(err_props, "\"is_recoverable\":true") || strstr(err_props, "\"is_recoverable\": 1")) {
+                is_handled = true;
+            }
+        }
+        /* Check orig_props */
+        if (!is_handled && orig_props && orig_props[0] != '\0') {
+            if (strstr(orig_props, "\"catches\":") || strstr(orig_props, "\"handles\":") ||
+                strstr(orig_props, "\"has_catch\":true") || strstr(orig_props, "\"has_recovery\":true")) {
+                is_handled = true;
+            }
+        }
+
+        if (is_handled) {
+            status_str = "HANDLED";
+        } else {
+            status_str = "UNHANDLED";
+        }
+
+        /* If unhandled_only filter is active, skip handled errors */
+        if (unhandled_only && is_handled) {
+            continue;
+        }
+
+        /* Extract or construct handling_block */
+        if (is_handled) {
+            if (edge_props && strstr(edge_props, "\"handling_block\":")) {
+                const char *p = strstr(edge_props, "\"handling_block\":");
+                p += strlen("\"handling_block\":");
+                while (*p == ' ' || *p == '\t') p++;
+                if (*p == '\"') {
+                    p++;
+                    const char *end = strchr(p, '\"');
+                    if (end && (size_t)(end - p) < sizeof(handling_block_buf)) {
+                        strncpy(handling_block_buf, p, (size_t)(end - p));
+                        handling_block_buf[end - p] = '\0';
+                    }
+                }
+            }
+            if (handling_block_buf[0] == '\0' && err_props && strstr(err_props, "\"handling_block\":")) {
+                const char *p = strstr(err_props, "\"handling_block\":");
+                p += strlen("\"handling_block\":");
+                while (*p == ' ' || *p == '\t') p++;
+                if (*p == '\"') {
+                    p++;
+                    const char *end = strchr(p, '\"');
+                    if (end && (size_t)(end - p) < sizeof(handling_block_buf)) {
+                        strncpy(handling_block_buf, p, (size_t)(end - p));
+                        handling_block_buf[end - p] = '\0';
+                    }
+                }
+            }
+            if (handling_block_buf[0] == '\0') {
+                if (res->file_path && res->file_path[0] != '\0') {
+                    snprintf(handling_block_buf, sizeof(handling_block_buf), "%s:%d (handled)",
+                             res->file_path, res->line > 0 ? res->line : 1);
+                } else if (orig_file && orig_file[0] != '\0') {
+                    snprintf(handling_block_buf, sizeof(handling_block_buf), "%s:%d (handled)",
+                             orig_file, orig_line > 0 ? orig_line : 1);
+                } else {
+                    snprintf(handling_block_buf, sizeof(handling_block_buf), "caller handling block");
+                }
+            }
+        }
+
+        /* Risk and recommendation */
+        char risk_buf[CBM_SZ_64] = "";
+        char rec_buf[CBM_SZ_512] = "";
+        if (!is_handled) {
+            if (edge_props && strstr(edge_props, "\"risk\":")) {
+                const char *p = strstr(edge_props, "\"risk\":");
+                p += strlen("\"risk\":");
+                while (*p == ' ' || *p == '\t') p++;
+                if (*p == '\"') {
+                    p++;
+                    const char *end = strchr(p, '\"');
+                    if (end && (size_t)(end - p) < sizeof(risk_buf)) {
+                        strncpy(risk_buf, p, (size_t)(end - p));
+                        risk_buf[end - p] = '\0';
+                    }
+                }
+            }
+            if (risk_buf[0] == '\0' && err_props && strstr(err_props, "\"risk\":")) {
+                const char *p = strstr(err_props, "\"risk\":");
+                p += strlen("\"risk\":");
+                while (*p == ' ' || *p == '\t') p++;
+                if (*p == '\"') {
+                    p++;
+                    const char *end = strchr(p, '\"');
+                    if (end && (size_t)(end - p) < sizeof(risk_buf)) {
+                        strncpy(risk_buf, p, (size_t)(end - p));
+                        risk_buf[end - p] = '\0';
+                    }
+                }
+            }
+            if (risk_buf[0] == '\0') {
+                if (err_props && (strstr(err_props, "\"is_recoverable\":true") || strstr(err_props, "\"is_recoverable\": 1"))) {
+                    strncpy(risk_buf, "MEDIUM", sizeof(risk_buf) - 1);
+                } else {
+                    strncpy(risk_buf, "HIGH", sizeof(risk_buf) - 1);
+                }
+            }
+
+            if (edge_props && strstr(edge_props, "\"recommendation\":")) {
+                const char *p = strstr(edge_props, "\"recommendation\":");
+                p += strlen("\"recommendation\":");
+                while (*p == ' ' || *p == '\t') p++;
+                if (*p == '\"') {
+                    p++;
+                    const char *end = strchr(p, '\"');
+                    if (end && (size_t)(end - p) < sizeof(rec_buf)) {
+                        strncpy(rec_buf, p, (size_t)(end - p));
+                        rec_buf[end - p] = '\0';
+                    }
+                }
+            }
+            if (rec_buf[0] == '\0' && err_props && strstr(err_props, "\"recommendation\":")) {
+                const char *p = strstr(err_props, "\"recommendation\":");
+                p += strlen("\"recommendation\":");
+                while (*p == ' ' || *p == '\t') p++;
+                if (*p == '\"') {
+                    p++;
+                    const char *end = strchr(p, '\"');
+                    if (end && (size_t)(end - p) < sizeof(rec_buf)) {
+                        strncpy(rec_buf, p, (size_t)(end - p));
+                        rec_buf[end - p] = '\0';
+                    }
+                }
+            }
+            if (rec_buf[0] == '\0') {
+                const char *target_label = (t_name && t_name[0] != '\0') ? t_name : target;
+                snprintf(rec_buf, sizeof(rec_buf), "Add recovery block in %s to handle %s gracefully.",
+                         target_label, err_type ? err_type : "error");
+            }
+        }
+
+        /* Check for duplicates */
+        bool duplicate = false;
+        for (int i = 0; i < res->propagating_errors_count; i++) {
+            cbm_error_flow_item_t *prev = &res->propagating_errors[i];
+            if (prev->error_type && err_type && strcmp(prev->error_type, err_type) == 0 &&
+                prev->origin_symbol && orig_qn && strcmp(prev->origin_symbol, orig_qn) == 0 &&
+                prev->call_path && call_path && strcmp(prev->call_path, call_path) == 0) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (duplicate) {
+            continue;
+        }
+
+        if (res->propagating_errors_count >= cap) {
+            int next_cap = cap * 2;
+            cbm_error_flow_item_t *grown = realloc(res->propagating_errors, (size_t)next_cap * sizeof(cbm_error_flow_item_t));
+            if (grown) {
+                res->propagating_errors = grown;
+                cap = next_cap;
+            }
+        }
+
+        if (res->propagating_errors_count < cap) {
+            cbm_error_flow_item_t *item = &res->propagating_errors[res->propagating_errors_count++];
+            memset(item, 0, sizeof(*item));
+
+            item->error_type = strdup(err_type ? err_type : "Error");
+            item->origin_symbol = strdup(orig_qn ? orig_qn : (orig_name ? orig_name : ""));
+            item->origin_file = strdup(orig_file ? orig_file : "");
+            item->origin_line = orig_line;
+            item->call_distance = call_distance;
+            item->call_path = strdup(call_path ? call_path : (orig_name ? orig_name : ""));
+            item->status = strdup(status_str);
+            if (is_handled && handling_block_buf[0] != '\0') {
+                item->handling_block = strdup(handling_block_buf);
+            }
+            if (!is_handled && risk_buf[0] != '\0') {
+                item->risk = strdup(risk_buf);
+            }
+            if (!is_handled && rec_buf[0] != '\0') {
+                item->recommendation = strdup(rec_buf);
+            }
+        }
+    }
+    sqlite3_finalize(stmt);
+    res->total_exceptions_detected = res->propagating_errors_count;
+
+    *out = res;
+    return CBM_STORE_OK;
+}

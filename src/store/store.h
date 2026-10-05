@@ -1465,6 +1465,42 @@ int cbm_store_find_dead_code(cbm_store_t *s, const char *project,
                              cbm_find_dead_code_result_t **out);
 void cbm_store_find_dead_code_result_free(cbm_find_dead_code_result_t *res);
 
+/* ── Error & exception propagation flow analyzer (RFC 008) ──────── */
+
+typedef struct {
+    char *error_type;       /* name of error/exception class/symbol */
+    char *origin_symbol;    /* qualified_name or name of function that throws */
+    char *origin_file;      /* file where throw/raise occurs */
+    int origin_line;        /* line number of throw/raise */
+    int call_distance;      /* depth / distance in call graph */
+    char *call_path;        /* e.g. "handle_rpc_post -> dispatch_rpc_call -> yy_parse_doc" */
+    char *status;           /* "HANDLED" or "UNHANDLED" */
+    char *handling_block;   /* description/location of handling block or NULL */
+    char *risk;             /* "HIGH", "MEDIUM", "LOW" or NULL */
+    char *recommendation;   /* advice/remediation prompt or NULL */
+} cbm_error_flow_item_t;
+
+typedef struct {
+    char *project;
+    char *target;
+    char *file_path;
+    int line;
+    int max_depth_searched;
+    int total_exceptions_detected;
+    cbm_error_flow_item_t *propagating_errors;
+    int propagating_errors_count;
+} cbm_trace_error_flow_result_t;
+
+typedef struct {
+    int max_depth;          /* default 4, min 1, max 8 */
+    bool unhandled_only;    /* default false */
+} cbm_trace_error_flow_opts_t;
+
+int cbm_store_trace_error_flow(cbm_store_t *s, const char *project, const char *target,
+                               const cbm_trace_error_flow_opts_t *opts,
+                               cbm_trace_error_flow_result_t **out);
+void cbm_store_trace_error_flow_result_free(cbm_trace_error_flow_result_t *res);
+
 #endif /* CBM_STORE_H */
 
 
