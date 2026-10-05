@@ -1303,5 +1303,56 @@ int cbm_store_audit_test_coverage(cbm_store_t *s, const char *project,
                                   cbm_audit_test_result_t **out);
 void cbm_store_audit_test_result_free(cbm_audit_test_result_t *res);
 
+/* ── Structural and semantic code clones catalog (RFC 004) ────────── */
+
+typedef struct {
+    char *target;          /* optional qualified symbol name or name */
+    char *file_path;       /* optional file path or directory filter */
+    double min_similarity; /* default 0.75, min 0.50, max 1.00 */
+    char *mode;            /* "all", "structural", "semantic" (default "all") */
+    int limit;             /* default 20, min 1, max 100 */
+} cbm_find_clones_opts_t;
+
+typedef struct {
+    char *qualified_name;
+    char *file_path;
+    int start_line;
+    int end_line;
+    double similarity_score;
+    char *edge_type;       /* "SIMILAR_TO" or "SEMANTICALLY_RELATED" */
+    char *clone_type;      /* "Exact / Type-1 Clone", "Near-Duplicate / Type-2 Clone", etc. */
+    char *differences;     /* descriptive difference summary */
+} cbm_code_clone_item_t;
+
+typedef struct {
+    int cluster_id;
+    char *representative_symbol;
+    char *representative_file;
+    int instance_count;
+    char **files_involved;
+    int files_involved_count;
+    double average_similarity;
+    char *description;
+} cbm_clone_cluster_t;
+
+typedef struct {
+    char *project;
+    char *target;          /* NULL in project-wide mode */
+    char *file_path;       /* target's file path, or filter */
+    int clones_found;      /* count of clones in target mode */
+    cbm_code_clone_item_t *clones;
+    char *refactoring_recommendation;
+
+    /* Project-wide cluster mode */
+    int total_clones_indexed;
+    cbm_clone_cluster_t *top_clone_clusters;
+    int top_clone_clusters_count;
+} cbm_find_clones_result_t;
+
+int cbm_store_find_code_clones(cbm_store_t *s, const char *project,
+                               const cbm_find_clones_opts_t *opts,
+                               cbm_find_clones_result_t **out);
+void cbm_store_find_clones_result_free(cbm_find_clones_result_t *res);
+
 #endif /* CBM_STORE_H */
 

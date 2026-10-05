@@ -1434,6 +1434,7 @@ TEST(mcp_tools_have_behavior_annotations) {
         {"analyze_blast_radius", true, false, true, false},
         {"get_api_surface", true, false, true, false},
         {"audit_test_coverage", true, false, true, false},
+        {"find_code_clones", true, false, true, false},
     };
 
     char *json = cbm_mcp_tools_list();
@@ -22773,6 +22774,230 @@ TEST(tool_audit_test_summary) {
     PASS();
 }
 
+TEST(tool_find_code_clones_target) {
+    const char *project = "test-clones-target";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-clones-target"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    /* 1. Target function: heap_strdup */
+    cbm_node_t n_target = {0};
+    n_target.project = project;
+    n_target.label = "Function";
+    n_target.name = "heap_strdup";
+    n_target.qualified_name = "src.mcp.mcp.heap_strdup";
+    n_target.file_path = "src/mcp/mcp.c";
+    n_target.start_line = 100;
+    n_target.end_line = 120;
+    n_target.properties_json = "{}";
+    int64_t target_id = cbm_store_upsert_node(st, &n_target);
+    ASSERT(target_id > 0);
+
+    /* 2. Clone 1: cbm_strdup (0.96) */
+    cbm_node_t n_clone1 = {0};
+    n_clone1.project = project;
+    n_clone1.label = "Function";
+    n_clone1.name = "cbm_strdup";
+    n_clone1.qualified_name = "src.foundation.compat.cbm_strdup";
+    n_clone1.file_path = "src/foundation/compat.c";
+    n_clone1.start_line = 84;
+    n_clone1.end_line = 98;
+    n_clone1.properties_json = "{}";
+    int64_t clone1_id = cbm_store_upsert_node(st, &n_clone1);
+    ASSERT(clone1_id > 0);
+
+    /* 3. Clone 2: safe_strdup (0.88) */
+    cbm_node_t n_clone2 = {0};
+    n_clone2.project = project;
+    n_clone2.label = "Function";
+    n_clone2.name = "safe_strdup";
+    n_clone2.qualified_name = "src.cli.cli.safe_strdup";
+    n_clone2.file_path = "src/cli/cli.c";
+    n_clone2.start_line = 312;
+    n_clone2.end_line = 330;
+    n_clone2.properties_json = "{}";
+    int64_t clone2_id = cbm_store_upsert_node(st, &n_clone2);
+    ASSERT(clone2_id > 0);
+
+    /* 4. Unrelated function: open_db */
+    cbm_node_t n_unrelated = {0};
+    n_unrelated.project = project;
+    n_unrelated.label = "Function";
+    n_unrelated.name = "open_db";
+    n_unrelated.qualified_name = "src.db.store.open_db";
+    n_unrelated.file_path = "src/db/store.c";
+    n_unrelated.start_line = 1;
+    n_unrelated.end_line = 10;
+    n_unrelated.properties_json = "{}";
+    int64_t unrelated_id = cbm_store_upsert_node(st, &n_unrelated);
+    ASSERT(unrelated_id > 0);
+
+    /* SIMILAR_TO edge between target and clone1 (similarity 0.96) */
+    cbm_edge_t e1 = {0};
+    e1.project = project;
+    e1.source_id = target_id;
+    e1.target_id = clone1_id;
+    e1.type = "SIMILAR_TO";
+    e1.properties_json = "{\"similarity\": 0.96, \"algorithm\": \"minhash_ast\"}";
+    ASSERT(cbm_store_insert_edge(st, &e1) > 0);
+
+    /* SIMILAR_TO edge between clone2 and target (similarity 0.88, reversed direction) */
+    cbm_edge_t e2 = {0};
+    e2.project = project;
+    e2.source_id = clone2_id;
+    e2.target_id = target_id;
+    e2.type = "SIMILAR_TO";
+    e2.properties_json = "{\"similarity\": 0.88, \"algorithm\": \"minhash_ast\"}";
+    ASSERT(cbm_store_insert_edge(st, &e2) > 0);
+
+    /* Call find_code_clones for target symbol */
+    char *resp = cbm_mcp_handle_tool(
+        srv, "find_code_clones",
+        "{\"project\":\"test-clones-target\",\"target\":\"src.mcp.mcp.heap_strdup\",\"min_similarity\":0.75}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NULL(strstr(resp, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "\"clones_found\":2"));
+    ASSERT_NOT_NULL(strstr(resp, "src.foundation.compat.cbm_strdup"));
+    ASSERT_NOT_NULL(strstr(resp, "src.cli.cli.safe_strdup"));
+    ASSERT_NOT_NULL(strstr(resp, "Exact / Type-1 Clone"));
+    ASSERT_NOT_NULL(strstr(resp, "Near-Duplicate / Type-2 Clone"));
+    ASSERT_NOT_NULL(strstr(resp, "refactoring_recommendation"));
+    ASSERT_NULL(strstr(resp, "src.db.store.open_db"));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_find_code_clones_threshold) {
+    const char *project = "test-clones-thresh";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-clones-thresh"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    cbm_node_t n_target = {0};
+    n_target.project = project;
+    n_target.label = "Function";
+    n_target.name = "algo_step";
+    n_target.qualified_name = "src.algo.algo_step";
+    n_target.file_path = "src/algo.c";
+    n_target.properties_json = "{}";
+    int64_t target_id = cbm_store_upsert_node(st, &n_target);
+    ASSERT(target_id > 0);
+
+    cbm_node_t n_high = {0};
+    n_high.project = project;
+    n_high.label = "Function";
+    n_high.name = "algo_step_v2";
+    n_high.qualified_name = "src.algo2.algo_step_v2";
+    n_high.file_path = "src/algo2.c";
+    n_high.properties_json = "{}";
+    int64_t high_id = cbm_store_upsert_node(st, &n_high);
+    ASSERT(high_id > 0);
+
+    cbm_node_t n_low = {0};
+    n_low.project = project;
+    n_low.label = "Function";
+    n_low.name = "algo_step_v3";
+    n_low.qualified_name = "src.algo3.algo_step_v3";
+    n_low.file_path = "src/algo3.c";
+    n_low.properties_json = "{}";
+    int64_t low_id = cbm_store_upsert_node(st, &n_low);
+    ASSERT(low_id > 0);
+
+    cbm_edge_t eh = {0};
+    eh.project = project;
+    eh.source_id = target_id;
+    eh.target_id = high_id;
+    eh.type = "SIMILAR_TO";
+    eh.properties_json = "{\"similarity\": 0.95}";
+    ASSERT(cbm_store_insert_edge(st, &eh) > 0);
+
+    cbm_edge_t el = {0};
+    el.project = project;
+    el.source_id = target_id;
+    el.target_id = low_id;
+    el.type = "SIMILAR_TO";
+    el.properties_json = "{\"similarity\": 0.65}";
+    ASSERT(cbm_store_insert_edge(st, &el) > 0);
+
+    /* Test min_similarity = 0.80 filters out 0.65 */
+    char *resp = cbm_mcp_handle_tool(
+        srv, "find_code_clones",
+        "{\"project\":\"test-clones-thresh\",\"target\":\"src.algo.algo_step\",\"min_similarity\":0.80}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NULL(strstr(resp, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "\"clones_found\":1"));
+    ASSERT_NOT_NULL(strstr(resp, "algo_step_v2"));
+    ASSERT_NULL(strstr(resp, "algo_step_v3"));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_find_code_clones_cross_file) {
+    const char *project = "test-clones-cross";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-clones-cross"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    cbm_node_t n1 = {0};
+    n1.project = project;
+    n1.label = "Function";
+    n1.name = "exec_sql";
+    n1.qualified_name = "src.store.store.exec_sql";
+    n1.file_path = "src/store/store.c";
+    n1.properties_json = "{}";
+    int64_t id1 = cbm_store_upsert_node(st, &n1);
+    ASSERT(id1 > 0);
+
+    cbm_node_t n2 = {0};
+    n2.project = project;
+    n2.label = "Function";
+    n2.name = "exec_sql_cli";
+    n2.qualified_name = "src.cli.cli.exec_sql_cli";
+    n2.file_path = "src/cli/cli.c";
+    n2.properties_json = "{}";
+    int64_t id2 = cbm_store_upsert_node(st, &n2);
+    ASSERT(id2 > 0);
+
+    cbm_edge_t e = {0};
+    e.project = project;
+    e.source_id = id1;
+    e.target_id = id2;
+    e.type = "SIMILAR_TO";
+    e.properties_json = "{\"similarity\": 0.92}";
+    ASSERT(cbm_store_insert_edge(st, &e) > 0);
+
+    /* Project-wide clone cluster query without target */
+    char *resp = cbm_mcp_handle_tool(
+        srv, "find_code_clones",
+        "{\"project\":\"test-clones-cross\",\"min_similarity\":0.75}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NULL(strstr(resp, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "\"total_clones_indexed\":1"));
+    ASSERT_NOT_NULL(strstr(resp, "\"top_clone_clusters\""));
+    ASSERT_NOT_NULL(strstr(resp, "src.store.store.exec_sql"));
+    ASSERT_NOT_NULL(strstr(resp, "src/store/store.c"));
+    ASSERT_NOT_NULL(strstr(resp, "src/cli/cli.c"));
+    ASSERT_NOT_NULL(strstr(resp, "\"instance_count\":2"));
+    ASSERT_NOT_NULL(strstr(resp, "\"description\""));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
 TEST(tool_trace_cursor_truncated_after_leg_is_rejected) {
     cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
     ASSERT_NOT_NULL(srv);
@@ -22858,6 +23083,9 @@ SUITE(mcp) {
     RUN_TEST(tool_audit_symbol_tests);
     RUN_TEST(tool_audit_test_excludes_test_nodes);
     RUN_TEST(tool_audit_test_summary);
+    RUN_TEST(tool_find_code_clones_target);
+    RUN_TEST(tool_find_code_clones_threshold);
+    RUN_TEST(tool_find_code_clones_cross_file);
     RUN_TEST(index_repository_async_and_status_refused_without_daemon_issue2144);
     RUN_TEST(index_repository_schema_documents_async_polling_issue2144);
     RUN_TEST(tool_result_add_notice_keeps_payload_shape_issue2144);

@@ -871,6 +871,18 @@ static const tool_def_t TOOLS[] = {
      "\"object\",\"properties\":{\"caller\":{\"type\":\"string\"},\"callee\":{\"type\":\"string\"},"
      "\"count\":{\"type\":\"integer\"}},\"additionalProperties\":false}},\"project\":{\"type\":"
      "\"string\"}},\"required\":[\"traces\",\"project\"]}"},
+
+    {"find_code_clones",
+     "Discovers duplicate or near-duplicate functions and structural code clones across a project "
+     "using pre-computed MinHash AST similarity and semantic graph edges.",
+     "{\"type\":\"object\",\"properties\":{"
+     "\"project\":{\"type\":\"string\",\"description\":\"Target project identifier registered in Codebase Memory.\"},"
+     "\"target\":{\"type\":\"string\",\"description\":\"Optional qualified symbol name to find clones of (e.g. 'src.mcp.mcp.heap_strdup'). If omitted, scans the project for top clone clusters.\"},"
+     "\"file_path\":{\"type\":\"string\",\"description\":\"Optional file path to limit clone search to a specific file or directory.\"},"
+     "\"min_similarity\":{\"type\":\"number\",\"default\":0.75,\"minimum\":0.50,\"maximum\":1.00,\"description\":\"Minimum similarity score threshold (0.50 to 1.00).\"},"
+     "\"mode\":{\"type\":\"string\",\"enum\":[\"all\",\"structural\",\"semantic\"],\"default\":\"all\",\"description\":\"Filter by clone type: structural (AST MinHash), semantic (token/type overlap), or all.\"},"
+     "\"limit\":{\"type\":\"integer\",\"default\":20,\"minimum\":1,\"maximum\":100,\"description\":\"Maximum number of clone pairs or clusters to return.\"}"
+     "},\"required\":[\"project\"]}"},
 };
 
 static const int TOOL_COUNT = sizeof(TOOLS) / sizeof(TOOLS[0]);
@@ -905,6 +917,7 @@ static const tool_annotation_def_t TOOL_ANNOTATIONS[] = {
     {"analyze_blast_radius", true, false, true, false},
     {"get_api_surface", true, false, true, false},
     {"audit_test_coverage", true, false, true, false},
+    {"find_code_clones", true, false, true, false},
     {"get_code_snippet", true, false, true, false},
     {"get_file_outline", true, false, true, false},
     {"get_graph_schema", true, false, true, false},
@@ -8760,6 +8773,147 @@ static char *handle_audit_test_coverage(cbm_mcp_server_t *srv, const char *args)
     free(project);
     free(mode);
     free(target);
+
+    char *mcp_res = cbm_mcp_text_result(json, false);
+    free(json);
+    return mcp_res;
+}
+
+static char *handle_find_code_clones(cbm_mcp_server_t *srv, const char *args) {
+    char *project = get_project_arg(args);
+    cbm_store_t *store = resolve_store(srv, project);
+    if (!store && srv && srv->store) {
+        store = srv->store;
+    }
+    REQUIRE_STORE(store, project);
+
+    char *not_indexed = verify_project_indexed(store, project);
+    if (not_indexed && srv && srv->store == store && cbm_store_count_nodes(store, project) > 0) {
+        free(not_indexed);
+        not_indexed = NULL;
+    }
+    if (not_indexed) {
+        free(project);
+        return not_indexed;
+    }
+
+    char *target = cbm_mcp_get_string_arg(args, "target");
+    char *file_path = cbm_mcp_get_string_arg(args, "file_path");
+    char *mode = cbm_mcp_get_string_arg(args, "mode");
+    if (!mode || mode[0] == '\0') {
+        free(mode);
+        mode = strdup("all");
+    }
+
+    double min_similarity = 0.75;
+    yyjson_doc *args_doc = args ? yyjson_read(args, strlen(args), 0) : NULL;
+    if (args_doc) {
+        yyjson_val *aroot = yyjson_doc_get_root(args_doc);
+        yyjson_val *msim = yyjson_obj_get(aroot, "min_similarity");
+        if (msim && yyjson_is_num(msim)) {
+            min_similarity = yyjson_get_num(msim);
+        }
+        yyjson_doc_free(args_doc);
+    }
+
+    int limit = cbm_mcp_get_int_arg(args, "limit", 20);
+
+    cbm_find_clones_opts_t opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.target = target;
+    opts.file_path = file_path;
+    opts.mode = mode;
+    opts.min_similarity = min_similarity;
+    opts.limit = limit;
+
+    cbm_find_clones_result_t *res = NULL;
+    int rc = cbm_store_find_code_clones(store, project, &opts, &res);
+    if (rc == CBM_STORE_NOT_FOUND) {
+        char err[CBM_SZ_512];
+        snprintf(err, sizeof(err), "symbol not found in project: '%s'", target ? target : "");
+        free(project);
+        free(target);
+        free(file_path);
+        free(mode);
+        return cbm_mcp_text_result(err, true);
+    }
+    if (rc != CBM_STORE_OK || !res) {
+        char err[CBM_SZ_512];
+        snprintf(err, sizeof(err), "failed to find code clones for project '%s'", project ? project : "");
+        free(project);
+        free(target);
+        free(file_path);
+        free(mode);
+        return cbm_mcp_text_result(err, true);
+    }
+
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+    yyjson_mut_val *root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
+
+    yyjson_mut_obj_add_str(doc, root, "project", res->project ? res->project : (project ? project : ""));
+
+    if (res->target) {
+        /* Scenario A: Target Symbol Clone Query */
+        yyjson_mut_obj_add_str(doc, root, "target", res->target);
+        yyjson_mut_obj_add_str(doc, root, "file_path", res->file_path ? res->file_path : "");
+        yyjson_mut_obj_add_int(doc, root, "clones_found", res->clones_found);
+
+        yyjson_mut_val *clones_arr = yyjson_mut_arr(doc);
+        for (int i = 0; i < res->clones_found; i++) {
+            cbm_code_clone_item_t *item = &res->clones[i];
+            yyjson_mut_val *iobj = yyjson_mut_obj(doc);
+            yyjson_mut_obj_add_str(doc, iobj, "qualified_name", item->qualified_name ? item->qualified_name : "");
+            yyjson_mut_obj_add_str(doc, iobj, "file_path", item->file_path ? item->file_path : "");
+
+            yyjson_mut_val *lr = yyjson_mut_arr(doc);
+            yyjson_mut_arr_add_int(doc, lr, item->start_line);
+            yyjson_mut_arr_add_int(doc, lr, item->end_line);
+            yyjson_mut_obj_add_val(doc, iobj, "line_range", lr);
+
+            yyjson_mut_obj_add_real(doc, iobj, "similarity_score", item->similarity_score);
+            yyjson_mut_obj_add_str(doc, iobj, "edge_type", item->edge_type ? item->edge_type : "SIMILAR_TO");
+            yyjson_mut_obj_add_str(doc, iobj, "clone_type", item->clone_type ? item->clone_type : "");
+            yyjson_mut_obj_add_str(doc, iobj, "differences", item->differences ? item->differences : "");
+            yyjson_mut_arr_add_val(clones_arr, iobj);
+        }
+        yyjson_mut_obj_add_val(doc, root, "clones", clones_arr);
+        yyjson_mut_obj_add_str(doc, root, "refactoring_recommendation",
+                               res->refactoring_recommendation ? res->refactoring_recommendation : "");
+    } else {
+        /* Scenario B: Project-Wide Top Duplicate Clusters */
+        yyjson_mut_obj_add_int(doc, root, "total_clones_indexed", res->total_clones_indexed);
+
+        yyjson_mut_val *clusters_arr = yyjson_mut_arr(doc);
+        for (int i = 0; i < res->top_clone_clusters_count; i++) {
+            cbm_clone_cluster_t *cl = &res->top_clone_clusters[i];
+            yyjson_mut_val *cobj = yyjson_mut_obj(doc);
+            yyjson_mut_obj_add_int(doc, cobj, "cluster_id", cl->cluster_id);
+            yyjson_mut_obj_add_str(doc, cobj, "representative_symbol",
+                                   cl->representative_symbol ? cl->representative_symbol : "");
+            yyjson_mut_obj_add_int(doc, cobj, "instance_count", cl->instance_count);
+
+            yyjson_mut_val *farr = yyjson_mut_arr(doc);
+            for (int j = 0; j < cl->files_involved_count; j++) {
+                yyjson_mut_arr_add_strcpy(doc, farr, cl->files_involved[j]);
+            }
+            yyjson_mut_obj_add_val(doc, cobj, "files_involved", farr);
+
+            yyjson_mut_obj_add_real(doc, cobj, "average_similarity", cl->average_similarity);
+            yyjson_mut_obj_add_str(doc, cobj, "description", cl->description ? cl->description : "");
+            yyjson_mut_arr_add_val(clusters_arr, cobj);
+        }
+        yyjson_mut_obj_add_val(doc, root, "top_clone_clusters", clusters_arr);
+    }
+
+    char *json = yy_doc_to_str(doc);
+    yyjson_mut_doc_free(doc);
+
+    cbm_store_find_clones_result_free(res);
+    free(project);
+    free(target);
+    free(file_path);
+    free(mode);
 
     char *mcp_res = cbm_mcp_text_result(json, false);
     free(json);
@@ -18855,6 +19009,9 @@ static char *dispatch_tool(cbm_mcp_server_t *srv, const char *tool_name, const c
     }
     if (strcmp(tool_name, "audit_test_coverage") == 0) {
         return handle_audit_test_coverage(srv, args_json);
+    }
+    if (strcmp(tool_name, "find_code_clones") == 0) {
+        return handle_find_code_clones(srv, args_json);
     }
 
 

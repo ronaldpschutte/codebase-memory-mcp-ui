@@ -241,6 +241,37 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     ),
   },
   {
+    name: "find_code_clones",
+    category: "Tracing & Architecture",
+    summary: "Detect duplicate or near-duplicate functions using AST MinHash and semantic similarity",
+    description:
+      "Discovers duplicate or near-duplicate functions and structural code clones across a project using pre-computed MinHash AST similarity and semantic graph edges.",
+    readOnly: true,
+    idempotent: true,
+    parameters: [
+      { name: "project", type: "string", required: true, description: "Target project identifier registered in Codebase Memory" },
+      { name: "target", type: "string", required: false, description: "Optional qualified symbol name to find clones of. If omitted, scans for top clone clusters." },
+      { name: "file_path", type: "string", required: false, description: "Optional file path to limit clone search to a specific file or directory" },
+      { name: "min_similarity", type: "number", required: false, defaultVal: 0.75, description: "Minimum similarity score threshold (0.50 to 1.00)" },
+      { name: "mode", type: "string", required: false, defaultVal: "all", enumVals: ["all", "structural", "semantic"], description: "Filter by clone type: structural (AST MinHash), semantic (token/type overlap), or all" },
+      { name: "limit", type: "integer", required: false, defaultVal: 20, description: "Maximum number of clone pairs or clusters to return (1-100)" },
+    ],
+    cliExample: "cbm cli find_code_clones --project={PROJECT} --min_similarity=0.75",
+    jsonExample: JSON.stringify(
+      {
+        name: "find_code_clones",
+        arguments: {
+          project: "{PROJECT}",
+          min_similarity: 0.75,
+          mode: "all",
+          limit: 20,
+        },
+      },
+      null,
+      2
+    ),
+  },
+  {
     name: "get_code_snippet",
     category: "Code Discovery",
     summary: "Fetch precise source code for a symbol, function, or line range",
