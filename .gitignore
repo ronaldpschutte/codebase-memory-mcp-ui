@@ -95,3 +95,6 @@ soak-results-query-leak/
 /diagrams_*.png
 graph-ui/src/diagrams.7z
 
+# Local git worktrees
+.worktrees/
+
