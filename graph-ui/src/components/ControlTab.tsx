@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { ProcessInfo } from "../lib/types";
 import { useUiMessages } from "../lib/i18n";
+import { ToolCallLogViewer } from "./ToolCallLogViewer";
 
 /* ── Elapsed parser ────────────────────────────────────── */
 
@@ -262,6 +263,11 @@ export function ControlTab() {
               ))}
             </div>
           )}
+        </div>
+
+        {/* Tool Call Log (NEW: Placed directly above Process Logs) */}
+        <div className="mb-8">
+          <ToolCallLogViewer />
         </div>
 
         {/* Log viewer */}

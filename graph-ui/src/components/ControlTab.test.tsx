@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ControlTab, parseElapsedSeconds } from "./ControlTab";
 import { messages } from "../lib/i18n";
@@ -72,6 +72,12 @@ describe("ControlTab", () => {
             headers: { "Content-Type": "application/json" },
           });
         }
+        if (url.includes("/api/tool-calls")) {
+          return new Response(JSON.stringify({ total: 0, latest_id: 0, tool_calls: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
         return new Response("{}", { status: 200 });
       })
     );
@@ -91,5 +97,242 @@ describe("ControlTab", () => {
     // Verify cumulative seconds are displayed as total
     expect(screen.getByText("118.1s total")).toBeInTheDocument();
     expect(screen.getByText("30.7s total")).toBeInTheDocument();
+  });
+
+  it("renders ToolCallLogViewer before Process Logs in the DOM", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/api/tool-calls")) {
+          return new Response(
+            JSON.stringify({
+              total: 2,
+              latest_id: 104,
+              tool_calls: [
+                {
+                  id: 104,
+                  timestamp: "2026-10-04T19:55:00.123Z",
+                  timestamp_ms: 1791136500123,
+                  tool: "analyze_blast_radius",
+                  project: "core-backend",
+                  duration_ms: 14.2,
+                  status: "ok",
+                  is_error: false,
+                  response_bytes: 1840,
+                  params: {
+                    project: "core-backend",
+                    target: "process_payment",
+                    max_depth: 3,
+                  },
+                },
+                {
+                  id: 103,
+                  timestamp: "2026-10-04T19:54:00.000Z",
+                  timestamp_ms: 1791136440000,
+                  tool: "get_code_snippet",
+                  project: "core-backend",
+                  duration_ms: 1.1,
+                  status: "error",
+                  is_error: true,
+                  response_bytes: 64,
+                  params: {
+                    project: "core-backend",
+                    symbol: "invalid_symbol",
+                  },
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        if (url.includes("/api/logs")) {
+          return new Response(JSON.stringify({ lines: ["log line 1"], total: 1 }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (url.includes("/api/processes")) {
+          return new Response(JSON.stringify({ processes: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response("{}", { status: 200 });
+      })
+    );
+
+    render(<ControlTab />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Tool Call Log")).toBeInTheDocument();
+      expect(screen.getByText("Process Logs")).toBeInTheDocument();
+    });
+
+    const toolCallHeader = screen.getByText("Tool Call Log");
+    const processLogsHeader = screen.getByText("Process Logs");
+    // Verify toolCallLog appears DOM-wise before process logs
+    expect(
+      toolCallHeader.compareDocumentPosition(processLogsHeader) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+
+    // Verify tool calls render with latency and badges
+    expect(screen.getByText("analyze_blast_radius")).toBeInTheDocument();
+    expect(screen.getByText('target: "process_payment"')).toBeInTheDocument();
+    expect(screen.getByText("14.2ms")).toBeInTheDocument();
+    expect(screen.getByText("get_code_snippet")).toBeInTheDocument();
+    expect(screen.getByText("1.1ms")).toBeInTheDocument();
+  });
+
+  it("expands parameter inspector on click and copies parameters via clipboard", async () => {
+    const writeTextMock = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: writeTextMock,
+      },
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/api/tool-calls")) {
+          return new Response(
+            JSON.stringify({
+              total: 1,
+              latest_id: 104,
+              tool_calls: [
+                {
+                  id: 104,
+                  timestamp: "2026-10-04T19:55:00.123Z",
+                  timestamp_ms: 1791136500123,
+                  tool: "analyze_blast_radius",
+                  project: "core-backend",
+                  duration_ms: 14.2,
+                  status: "ok",
+                  is_error: false,
+                  response_bytes: 1840,
+                  params: {
+                    project: "core-backend",
+                    target: "process_payment",
+                  },
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response(JSON.stringify({ lines: [], processes: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      })
+    );
+
+    render(<ControlTab />);
+
+    await waitFor(() => {
+      expect(screen.getByText("analyze_blast_radius")).toBeInTheDocument();
+    });
+
+    // Click to expand row
+    const row = screen.getByText("analyze_blast_radius");
+    await act(async () => {
+      fireEvent.click(row);
+    });
+
+    // Verify copy button appears and click it
+    await waitFor(() => {
+      expect(screen.getByText("Copy Parameters")).toBeInTheDocument();
+    });
+
+    const copyBtn = screen.getByText("Copy Parameters");
+    await act(async () => {
+      fireEvent.click(copyBtn);
+    });
+
+    expect(writeTextMock).toHaveBeenCalled();
+    const copiedText = writeTextMock.mock.calls[0][0];
+    expect(copiedText).toContain("process_payment");
+
+    // Verify visual feedback
+    await waitFor(() => {
+      expect(screen.getByText("Copied!")).toBeInTheDocument();
+    });
+  });
+
+  it("filters tool calls by status pills", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/api/tool-calls")) {
+          return new Response(
+            JSON.stringify({
+              total: 2,
+              latest_id: 104,
+              tool_calls: [
+                {
+                  id: 104,
+                  timestamp: "2026-10-04T19:55:00.123Z",
+                  timestamp_ms: 1791136500123,
+                  tool: "analyze_blast_radius",
+                  project: "core-backend",
+                  duration_ms: 14.2,
+                  status: "ok",
+                  is_error: false,
+                  response_bytes: 1840,
+                  params: { target: "process_payment" },
+                },
+                {
+                  id: 103,
+                  timestamp: "2026-10-04T19:54:00.000Z",
+                  timestamp_ms: 1791136440000,
+                  tool: "get_code_snippet",
+                  project: "core-backend",
+                  duration_ms: 1.1,
+                  status: "error",
+                  is_error: true,
+                  response_bytes: 64,
+                  params: { symbol: "invalid_symbol" },
+                },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response(JSON.stringify({ lines: [], processes: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      })
+    );
+
+    render(<ControlTab />);
+
+    await waitFor(() => {
+      expect(screen.getByText("analyze_blast_radius")).toBeInTheDocument();
+      expect(screen.getByText("get_code_snippet")).toBeInTheDocument();
+    });
+
+    // Click "Success" pill
+    const successPill = screen.getByText("Success");
+    await act(async () => {
+      fireEvent.click(successPill);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("analyze_blast_radius")).toBeInTheDocument();
+      expect(screen.queryByText("get_code_snippet")).not.toBeInTheDocument();
+    });
+
+    // Click "Errors" pill
+    const errorsPill = screen.getByText("Errors");
+    await act(async () => {
+      fireEvent.click(errorsPill);
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("analyze_blast_radius")).not.toBeInTheDocument();
+      expect(screen.getByText("get_code_snippet")).toBeInTheDocument();
+    });
   });
 });

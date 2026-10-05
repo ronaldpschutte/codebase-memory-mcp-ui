@@ -500,7 +500,8 @@ UI_SRCS = \
     src/ui/http_server.c \
     src/ui/layout3d.c \
     src/ui/httpd.c \
-    src/ui/embedded_stub.c
+    src/ui/embedded_stub.c \
+    src/ui/tool_call_log.c
 
 # Diagram module
 DIAGRAM_SRCS = \

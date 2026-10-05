@@ -113,3 +113,16 @@ export interface ProcessInfo {
   command: string;
   is_self: boolean;
 }
+
+export interface ToolCallRecord {
+  id: number;
+  timestamp: string;
+  timestamp_ms: number;
+  tool: string;
+  project?: string;
+  duration_ms: number;
+  status: "ok" | "error";
+  is_error: boolean;
+  response_bytes: number;
+  params: Record<string, unknown>;
+}

@@ -7,15 +7,11 @@ import {
   Check,
   Terminal,
   ShieldCheck,
-  Layers,
   Wrench,
   Code2,
   ChevronDown,
   ChevronRight,
   Sparkles,
-  GitBranch,
-  Database,
-  Compass,
 } from "lucide-react";
 
 export const MCP_TOOLS: McpToolDefinition[] = [
