@@ -36,7 +36,9 @@
 #include "cli/cli.h"
 #include "cli/progress_sink.h"
 #include "diagram/diagram.h"
+#include "foundation/compat.h"
 #include "foundation/constants.h"
+#include "foundation/str_util.h"
 
 enum {
     MAIN_MIN_ARGC = 1,

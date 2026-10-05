@@ -32,8 +32,12 @@
 #include <sys/stat.h> /* chmod / stat for read-only query reproductions */
 #ifdef _WIN32
 #include <direct.h>
+#ifndef cbm_chdir
 #define cbm_chdir _chdir
+#endif
+#ifndef cbm_getcwd
 #define cbm_getcwd _getcwd
+#endif
 #else
 #ifdef __APPLE__
 #include <libproc.h>
@@ -42,8 +46,12 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#ifndef cbm_chdir
 #define cbm_chdir chdir
+#endif
+#ifndef cbm_getcwd
 #define cbm_getcwd getcwd
+#endif
 extern char **environ;
 #endif
 

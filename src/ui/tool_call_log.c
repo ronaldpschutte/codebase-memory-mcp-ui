@@ -134,14 +134,14 @@ static bool is_sensitive_key(const char *key, size_t key_len) {
 }
 
 /* Redact sensitive keyword values in JSON and clamp oversized payloads */
-static char *sanitize_and_clamp_params(const char *raw) {
+static char *sanitize_and_clamp_payload(const char *raw, size_t max_bytes) {
     if (!raw || !raw[0]) {
         return strdup("{}");
     }
 
     size_t raw_len = strlen(raw);
-    bool needs_truncation = (raw_len > CBM_TOOL_CALL_PARAM_MAX);
-    size_t scan_len = needs_truncation ? (CBM_TOOL_CALL_PARAM_MAX - 32) : raw_len;
+    bool needs_truncation = (raw_len > max_bytes);
+    size_t scan_len = needs_truncation ? (max_bytes - 32) : raw_len;
 
     /* Allocate capacity allowing for redaction replacement expansions */
     size_t cap = scan_len + 256;
@@ -272,7 +272,12 @@ static char *sanitize_and_clamp_params(const char *raw) {
     return out;
 }
 
+static char *sanitize_and_clamp_params(const char *raw) {
+    return sanitize_and_clamp_payload(raw, CBM_TOOL_CALL_PARAM_MAX);
+}
+
 void cbm_tool_call_log_record(const char *tool_name, const char *params_json,
+                              const char *response_json,
                               bool is_error, int64_t duration_us, size_t response_bytes) {
     if (!tool_name) {
         return;
@@ -282,7 +287,8 @@ void cbm_tool_call_log_record(const char *tool_name, const char *params_json,
     char project[128] = {0};
     extract_project(params_json, project, sizeof(project));
 
-    char *sanitized = sanitize_and_clamp_params(params_json);
+    char *sanitized_params = sanitize_and_clamp_params(params_json);
+    char *sanitized_resp = response_json ? sanitize_and_clamp_payload(response_json, CBM_TOOL_CALL_RESPONSE_MAX) : NULL;
 
     cbm_mutex_lock(&g_tool_ring.lock);
     int slot = g_tool_ring.head;
@@ -290,13 +296,18 @@ void cbm_tool_call_log_record(const char *tool_name, const char *params_json,
         free(g_tool_ring.entries[slot].params_json);
         g_tool_ring.entries[slot].params_json = NULL;
     }
+    if (g_tool_ring.entries[slot].response_json) {
+        free(g_tool_ring.entries[slot].response_json);
+        g_tool_ring.entries[slot].response_json = NULL;
+    }
 
     cbm_tool_call_record_t *rec = &g_tool_ring.entries[slot];
     rec->id = g_tool_ring.next_id++;
     rec->timestamp_ms = get_wall_time_ms();
     snprintf(rec->tool_name, sizeof(rec->tool_name), "%s", tool_name);
     snprintf(rec->project, sizeof(rec->project), "%s", project);
-    rec->params_json = sanitized;
+    rec->params_json = sanitized_params;
+    rec->response_json = sanitized_resp;
     rec->duration_us = duration_us;
     rec->is_error = is_error;
     rec->response_bytes = response_bytes;
@@ -316,6 +327,10 @@ int cbm_tool_call_log_clear(void) {
         if (g_tool_ring.entries[i].params_json) {
             free(g_tool_ring.entries[i].params_json);
             g_tool_ring.entries[i].params_json = NULL;
+        }
+        if (g_tool_ring.entries[i].response_json) {
+            free(g_tool_ring.entries[i].response_json);
+            g_tool_ring.entries[i].response_json = NULL;
         }
         memset(&g_tool_ring.entries[i], 0, sizeof(g_tool_ring.entries[i]));
     }
@@ -341,6 +356,11 @@ int cbm_tool_call_log_get(cbm_tool_call_record_t *out_records, int max_records) 
             out_records[i].params_json = strdup(g_tool_ring.entries[idx].params_json);
         } else {
             out_records[i].params_json = NULL;
+        }
+        if (g_tool_ring.entries[idx].response_json) {
+            out_records[i].response_json = strdup(g_tool_ring.entries[idx].response_json);
+        } else {
+            out_records[i].response_json = NULL;
         }
     }
     cbm_mutex_unlock(&g_tool_ring.lock);
@@ -504,6 +524,26 @@ char *cbm_tool_call_log_to_json(int limit, uint64_t since_id, const char *tool_f
             if (!dyn_buf_appends(&db, "\"}")) break;
         } else {
             if (!dyn_buf_appends(&db, "{}")) break;
+        }
+
+        /* Append response */
+        if (!dyn_buf_appends(&db, ",\"response\":")) break;
+        const char *rj = rec->response_json;
+        if (rj && rj[0]) {
+            bool resp_truncated = (strstr(rj, "(truncated)") != NULL);
+            if (!resp_truncated && (rj[0] == '{' || rj[0] == '[')) {
+                if (!dyn_buf_appends(&db, rj)) break;
+            } else if (resp_truncated) {
+                if (!dyn_buf_appends(&db, "{\"_truncated\":true,\"_raw\":\"")) break;
+                if (!dyn_buf_append_escaped(&db, rj)) break;
+                if (!dyn_buf_appends(&db, "\"}")) break;
+            } else {
+                if (!dyn_buf_appends(&db, "\"")) break;
+                if (!dyn_buf_append_escaped(&db, rj)) break;
+                if (!dyn_buf_appends(&db, "\"")) break;
+            }
+        } else {
+            if (!dyn_buf_appends(&db, "null")) break;
         }
 
         if (!dyn_buf_appends(&db, "}")) break;

@@ -234,4 +234,25 @@ static inline const char *cbm_tmpdir(void) {
 #define CBM_HAS_SIGACTION 1
 #endif
 
+/* ── Current working directory ────────────────────────────────── */
+#ifndef cbm_getcwd
+#ifdef _WIN32
+#include <direct.h>
+#define cbm_getcwd _getcwd
+#else
+#include <unistd.h>
+#define cbm_getcwd getcwd
+#endif
+#endif
+
+#ifndef cbm_chdir
+#ifdef _WIN32
+#include <direct.h>
+#define cbm_chdir _chdir
+#else
+#include <unistd.h>
+#define cbm_chdir chdir
+#endif
+#endif
+
 #endif /* CBM_COMPAT_H */

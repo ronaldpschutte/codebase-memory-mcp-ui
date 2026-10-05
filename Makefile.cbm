@@ -1242,9 +1242,10 @@ PROD_SRCS_WITH_ASSETS = $(subst src/ui/embedded_stub.c,src/ui/embedded_assets.c,
 EMBED_OBJS = $(wildcard $(BUILD_DIR)/embedded/embed_*.o)
 
 frontend:
-	cd graph-ui && npm ci && npm run build
+	cd graph-ui && ([ -d node_modules ] || npm ci) && npm run build
 
-embed: frontend
+embed:
+	@if [ ! -f graph-ui/dist/index.html ]; then $(MAKE) -f Makefile.cbm frontend; fi
 	scripts/embed-frontend.sh graph-ui/dist $(BUILD_DIR)/embedded
 
 cbm-with-ui: embed $(OBJS_VENDORED_PROD)

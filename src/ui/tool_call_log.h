@@ -15,6 +15,7 @@
 
 #define CBM_TOOL_CALL_RING_SIZE 500
 #define CBM_TOOL_CALL_PARAM_MAX (64 * 1024) /* 64 KB cap per call payload */
+#define CBM_TOOL_CALL_RESPONSE_MAX (64 * 1024) /* 64 KB cap per response payload */
 
 typedef struct {
     uint64_t id;                  /* Monotonically increasing call ID */
@@ -22,6 +23,7 @@ typedef struct {
     char tool_name[64];           /* Name of the MCP tool invoked */
     char project[128];            /* Target project if identified in params */
     char *params_json;            /* Heap-allocated JSON string of parameters */
+    char *response_json;          /* Heap-allocated JSON string of response */
     int64_t duration_us;          /* Execution duration in microseconds */
     bool is_error;                /* True if tool returned isError or failure */
     size_t response_bytes;        /* Size in bytes of output JSON payload */
@@ -40,6 +42,7 @@ void cbm_tool_call_log_init(void);
 
 /* Record an MCP tool call into the ring buffer. */
 void cbm_tool_call_log_record(const char *tool_name, const char *params_json,
+                              const char *response_json,
                               bool is_error, int64_t duration_us, size_t response_bytes);
 
 /* Clear all entries from the ring buffer. Returns number of cleared entries. */
