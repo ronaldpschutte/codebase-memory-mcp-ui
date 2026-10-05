@@ -272,6 +272,35 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     ),
   },
   {
+    name: "get_coupled_files",
+    category: "Tracing & Architecture",
+    summary: "Find hidden companion files that historically commit together from git history",
+    description:
+      "Returns the 'hidden companion files' that historically commit together with a target file based on mined git history, preventing forgotten edits and out-of-sync migrations.",
+    readOnly: true,
+    idempotent: true,
+    parameters: [
+      { name: "project", type: "string", required: true, description: "Target project identifier registered in Codebase Memory" },
+      { name: "file_path", type: "string", required: true, description: "Relative path of the target file being inspected or edited (e.g. 'src/store/store.c')" },
+      { name: "min_confidence", type: "number", required: false, defaultVal: 0.30, description: "Minimum co-change confidence threshold (0.10 to 1.00)" },
+      { name: "limit", type: "integer", required: false, defaultVal: 10, description: "Maximum number of coupled companion files to return (1-50)" },
+    ],
+    cliExample: "cbm cli get_coupled_files --project={PROJECT} --file_path=src/store/store.c",
+    jsonExample: JSON.stringify(
+      {
+        name: "get_coupled_files",
+        arguments: {
+          project: "{PROJECT}",
+          file_path: "src/store/store.c",
+          min_confidence: 0.30,
+          limit: 10,
+        },
+      },
+      null,
+      2
+    ),
+  },
+  {
     name: "get_code_snippet",
     category: "Code Discovery",
     summary: "Fetch precise source code for a symbol, function, or line range",

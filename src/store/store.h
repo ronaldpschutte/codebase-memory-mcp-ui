@@ -1354,5 +1354,37 @@ int cbm_store_find_code_clones(cbm_store_t *s, const char *project,
                                cbm_find_clones_result_t **out);
 void cbm_store_find_clones_result_free(cbm_find_clones_result_t *res);
 
+/* ── Temporal commit co-change & companion files (RFC 005) ────── */
+
+typedef struct {
+    char *file_path;
+    int co_commit_count;
+    double confidence;
+    char *coupling_strength; /* "VERY HIGH", "HIGH", "MODERATE", "LOW" */
+    char *relationship_type; /* "header_implementation", "unit_test", "schema_migration", "pipeline_consumer", "co_changed_companion" */
+    char *recommendation;    /* Contextual recommendation */
+    char *last_seen;         /* Optional timestamp or date string */
+} cbm_coupled_file_item_t;
+
+typedef struct {
+    char *project;
+    char *source_file;
+    int total_commits_recorded;
+    int companion_files_count;
+    cbm_coupled_file_item_t *coupled_files;
+    char *pre_commit_warning;
+} cbm_coupled_files_result_t;
+
+typedef struct {
+    double min_confidence;   /* default 0.30, min 0.10, max 1.00 */
+    int limit;               /* default 10, min 1, max 50 */
+} cbm_coupled_files_opts_t;
+
+int cbm_store_get_coupled_files(cbm_store_t *s, const char *project, const char *file_path,
+                                const cbm_coupled_files_opts_t *opts,
+                                cbm_coupled_files_result_t **out);
+void cbm_store_coupled_files_result_free(cbm_coupled_files_result_t *res);
+
 #endif /* CBM_STORE_H */
+
 

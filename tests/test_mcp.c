@@ -1435,6 +1435,7 @@ TEST(mcp_tools_have_behavior_annotations) {
         {"get_api_surface", true, false, true, false},
         {"audit_test_coverage", true, false, true, false},
         {"find_code_clones", true, false, true, false},
+        {"get_coupled_files", true, false, true, false},
     };
 
     char *json = cbm_mcp_tools_list();
@@ -22998,6 +22999,195 @@ TEST(tool_find_code_clones_cross_file) {
     PASS();
 }
 
+TEST(tool_coupled_files_bidirectional) {
+    const char *project = "test-coupled-bidirectional";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-coupled-bidirectional"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    /* 1. File A: src/store/store.c */
+    cbm_node_t file_a = {0};
+    file_a.project = project;
+    file_a.label = "File";
+    file_a.name = "store.c";
+    file_a.qualified_name = "test-coupled-bidirectional:src/store/store.c:__file__";
+    file_a.file_path = "src/store/store.c";
+    file_a.properties_json = "{\"extension\":\".c\",\"change_count\":54}";
+    int64_t id_a = cbm_store_upsert_node(st, &file_a);
+    ASSERT_GT(id_a, 0);
+
+    /* 2. File B: src/store/store.h */
+    cbm_node_t file_b = {0};
+    file_b.project = project;
+    file_b.label = "File";
+    file_b.name = "store.h";
+    file_b.qualified_name = "test-coupled-bidirectional:src/store/store.h:__file__";
+    file_b.file_path = "src/store/store.h";
+    file_b.properties_json = "{\"extension\":\".h\",\"change_count\":50}";
+    int64_t id_b = cbm_store_upsert_node(st, &file_b);
+    ASSERT_GT(id_b, 0);
+
+    /* 3. Edge A -> B: FILE_CHANGES_WITH */
+    cbm_edge_t e = {0};
+    e.project = project;
+    e.source_id = id_a;
+    e.target_id = id_b;
+    e.type = "FILE_CHANGES_WITH";
+    e.properties_json = "{\"co_commits\":48,\"confidence\":0.889,\"last_seen\":\"2026-09-28\"}";
+    ASSERT_GT(cbm_store_insert_edge(st, &e), 0);
+
+    /* Query File A -> finds companion File B */
+    char *resp_a = cbm_mcp_handle_tool(
+        srv, "get_coupled_files",
+        "{\"project\":\"test-coupled-bidirectional\",\"file_path\":\"src/store/store.c\"}");
+    ASSERT_NOT_NULL(resp_a);
+    ASSERT_NULL(strstr(resp_a, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp_a, "\"source_file\":\"src/store/store.c\""));
+    ASSERT_NOT_NULL(strstr(resp_a, "\"companion_files_count\":1"));
+    ASSERT_NOT_NULL(strstr(resp_a, "\"file_path\":\"src/store/store.h\""));
+    ASSERT_NOT_NULL(strstr(resp_a, "\"co_commit_count\":48"));
+    ASSERT_NOT_NULL(strstr(resp_a, "\"coupling_strength\":\"VERY HIGH\""));
+    ASSERT_NOT_NULL(strstr(resp_a, "\"relationship_type\":\"header_implementation\""));
+    ASSERT_NOT_NULL(strstr(resp_a, "\"pre_commit_warning\""));
+    ASSERT_NOT_NULL(strstr(resp_a, "Warning: Edits to 'src/store/store.c' usually require corresponding changes in 'src/store/store.h' (89% historical frequency)."));
+    free(resp_a);
+
+    /* Query File B -> finds companion File A (verifying bidirectional discovery) */
+    char *resp_b = cbm_mcp_handle_tool(
+        srv, "get_coupled_files",
+        "{\"project\":\"test-coupled-bidirectional\",\"file_path\":\"src/store/store.h\"}");
+    ASSERT_NOT_NULL(resp_b);
+    ASSERT_NULL(strstr(resp_b, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp_b, "\"source_file\":\"src/store/store.h\""));
+    ASSERT_NOT_NULL(strstr(resp_b, "\"companion_files_count\":1"));
+    ASSERT_NOT_NULL(strstr(resp_b, "\"file_path\":\"src/store/store.c\""));
+    ASSERT_NOT_NULL(strstr(resp_b, "\"coupling_strength\":\"VERY HIGH\""));
+    ASSERT_NOT_NULL(strstr(resp_b, "\"relationship_type\":\"header_implementation\""));
+    free(resp_b);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_coupled_files_confidence_filtering) {
+    const char *project = "test-coupled-filtering";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-coupled-filtering"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    cbm_node_t src = {0};
+    src.project = project;
+    src.label = "File";
+    src.name = "store.c";
+    src.qualified_name = "test-coupled-filtering:src/store/store.c:__file__";
+    src.file_path = "src/store/store.c";
+    int64_t id_src = cbm_store_upsert_node(st, &src);
+    ASSERT_GT(id_src, 0);
+
+    /* Companion 1: store.h (conf = 0.889) */
+    cbm_node_t c1 = {0};
+    c1.project = project;
+    c1.label = "File";
+    c1.name = "store.h";
+    c1.qualified_name = "test-coupled-filtering:src/store/store.h:__file__";
+    c1.file_path = "src/store/store.h";
+    int64_t id_c1 = cbm_store_upsert_node(st, &c1);
+    ASSERT_GT(id_c1, 0);
+
+    /* Companion 2: tests/test_store.c (conf = 0.704) */
+    cbm_node_t c2 = {0};
+    c2.project = project;
+    c2.label = "File";
+    c2.name = "test_store.c";
+    c2.qualified_name = "test-coupled-filtering:tests/test_store.c:__file__";
+    c2.file_path = "tests/test_store.c";
+    int64_t id_c2 = cbm_store_upsert_node(st, &c2);
+    ASSERT_GT(id_c2, 0);
+
+    /* Companion 3: src/pipeline/pipeline_delta.c (conf = 0.333) */
+    cbm_node_t c3 = {0};
+    c3.project = project;
+    c3.label = "File";
+    c3.name = "pipeline_delta.c";
+    c3.qualified_name = "test-coupled-filtering:src/pipeline/pipeline_delta.c:__file__";
+    c3.file_path = "src/pipeline/pipeline_delta.c";
+    int64_t id_c3 = cbm_store_upsert_node(st, &c3);
+    ASSERT_GT(id_c3, 0);
+
+    cbm_edge_t e1 = {.project = project, .source_id = id_src, .target_id = id_c1, .type = "FILE_CHANGES_WITH",
+                     .properties_json = "{\"co_commits\":48,\"confidence\":0.889}"};
+    ASSERT_GT(cbm_store_insert_edge(st, &e1), 0);
+
+    cbm_edge_t e2 = {.project = project, .source_id = id_src, .target_id = id_c2, .type = "FILE_CHANGES_WITH",
+                     .properties_json = "{\"co_commits\":38,\"confidence\":0.704}"};
+    ASSERT_GT(cbm_store_insert_edge(st, &e2), 0);
+
+    cbm_edge_t e3 = {.project = project, .source_id = id_src, .target_id = id_c3, .type = "FILE_CHANGES_WITH",
+                     .properties_json = "{\"co_commits\":18,\"confidence\":0.333}"};
+    ASSERT_GT(cbm_store_insert_edge(st, &e3), 0);
+
+    /* Query with min_confidence = 0.50 -> returns only store.h and test_store.c */
+    char *resp = cbm_mcp_handle_tool(
+        srv, "get_coupled_files",
+        "{\"project\":\"test-coupled-filtering\",\"file_path\":\"src/store/store.c\",\"min_confidence\":0.50}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NULL(strstr(resp, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "\"companion_files_count\":2"));
+    ASSERT_NOT_NULL(strstr(resp, "src/store/store.h"));
+    ASSERT_NOT_NULL(strstr(resp, "tests/test_store.c"));
+    ASSERT_NULL(strstr(resp, "src/pipeline/pipeline_delta.c"));
+    free(resp);
+
+    /* Query with limit = 1 -> returns only top companion */
+    char *resp_limit = cbm_mcp_handle_tool(
+        srv, "get_coupled_files",
+        "{\"project\":\"test-coupled-filtering\",\"file_path\":\"src/store/store.c\",\"limit\":1}");
+    ASSERT_NOT_NULL(resp_limit);
+    ASSERT_NOT_NULL(strstr(resp_limit, "\"companion_files_count\":1"));
+    ASSERT_NOT_NULL(strstr(resp_limit, "src/store/store.h"));
+    ASSERT_NULL(strstr(resp_limit, "tests/test_store.c"));
+    free(resp_limit);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(tool_coupled_files_not_found) {
+    const char *project = "test-coupled-notfound";
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_store_t *st = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(st);
+    ASSERT_EQ(cbm_store_upsert_project(st, project, "/tmp/test-coupled-notfound"), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    /* Upsert at least one node so project is indexed */
+    cbm_node_t dummy = {0};
+    dummy.project = project;
+    dummy.label = "File";
+    dummy.name = "dummy.c";
+    dummy.qualified_name = "test-coupled-notfound:dummy.c:__file__";
+    dummy.file_path = "dummy.c";
+    ASSERT_GT(cbm_store_upsert_node(st, &dummy), 0);
+
+    char *resp = cbm_mcp_handle_tool(
+        srv, "get_coupled_files",
+        "{\"project\":\"test-coupled-notfound\",\"file_path\":\"nonexistent/file.c\"}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "\"isError\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "file not found in project: 'nonexistent/file.c'"));
+    free(resp);
+
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
 TEST(tool_trace_cursor_truncated_after_leg_is_rejected) {
     cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
     ASSERT_NOT_NULL(srv);
@@ -23086,6 +23276,9 @@ SUITE(mcp) {
     RUN_TEST(tool_find_code_clones_target);
     RUN_TEST(tool_find_code_clones_threshold);
     RUN_TEST(tool_find_code_clones_cross_file);
+    RUN_TEST(tool_coupled_files_bidirectional);
+    RUN_TEST(tool_coupled_files_confidence_filtering);
+    RUN_TEST(tool_coupled_files_not_found);
     RUN_TEST(index_repository_async_and_status_refused_without_daemon_issue2144);
     RUN_TEST(index_repository_schema_documents_async_polling_issue2144);
     RUN_TEST(tool_result_add_notice_keeps_payload_shape_issue2144);

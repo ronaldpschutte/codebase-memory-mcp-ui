@@ -11917,3 +11917,289 @@ int cbm_store_find_code_clones(cbm_store_t *s, const char *project,
     return CBM_STORE_OK;
 }
 
+/* ── Temporal commit co-change & companion files (RFC 005) ────── */
+
+static void cbm_classify_file_coupling(const char *src_file, const char *companion_file,
+                                       int co_commits, double confidence,
+                                       char **out_rel_type, char **out_rec) {
+    if (!out_rel_type || !out_rec) return;
+    *out_rel_type = NULL;
+    *out_rec = NULL;
+
+    const char *s_ext = strrchr(src_file ? src_file : "", '.');
+    const char *c_ext = strrchr(companion_file ? companion_file : "", '.');
+
+    /* 1. Header <-> Implementation */
+    bool s_is_c = s_ext && (strcmp(s_ext, ".c") == 0 || strcmp(s_ext, ".cpp") == 0 || strcmp(s_ext, ".cc") == 0);
+    bool s_is_h = s_ext && (strcmp(s_ext, ".h") == 0 || strcmp(s_ext, ".hpp") == 0);
+    bool c_is_c = c_ext && (strcmp(c_ext, ".c") == 0 || strcmp(c_ext, ".cpp") == 0 || strcmp(c_ext, ".cc") == 0);
+    bool c_is_h = c_ext && (strcmp(c_ext, ".h") == 0 || strcmp(c_ext, ".hpp") == 0);
+
+    if ((s_is_c && c_is_h) || (s_is_h && c_is_c)) {
+        *out_rel_type = strdup("header_implementation");
+        if (c_is_h) {
+            *out_rec = strdup("Header definition file. Ensure any new store function signatures are declared here.");
+        } else {
+            *out_rec = strdup("Implementation source file. Ensure function definitions match header declarations.");
+        }
+        return;
+    }
+
+    /* 2. Unit or Integration Tests */
+    bool c_is_test = companion_file && (strstr(companion_file, "test") != NULL || strstr(companion_file, "spec") != NULL);
+    bool s_is_test = src_file && (strstr(src_file, "test") != NULL || strstr(src_file, "spec") != NULL);
+
+    if (c_is_test && !s_is_test) {
+        *out_rel_type = strdup("unit_test");
+        char rec[256];
+        const char *base = strrchr(src_file ? src_file : "", '/');
+        base = base ? base + 1 : (src_file ? src_file : "file");
+        snprintf(rec, sizeof(rec), "Test suite file. Ensure unit tests are updated or added for changes in %s.", base);
+        *out_rec = strdup(rec);
+        return;
+    }
+    if (s_is_test && !c_is_test) {
+        *out_rel_type = strdup("tested_component");
+        *out_rec = strdup("Target component under test. Verify behavioral assertions against actual component implementation.");
+        return;
+    }
+
+    /* 3. Database Schema & Migrations */
+    bool c_is_migration = (c_ext && strcmp(c_ext, ".sql") == 0) ||
+                          (companion_file && (strstr(companion_file, "migration") != NULL || strstr(companion_file, "schema") != NULL));
+    if (c_is_migration) {
+        *out_rel_type = strdup("schema_migration");
+        *out_rec = strdup("Database schema or migration script. Ensure data model changes are accompanied by corresponding migrations.");
+        return;
+    }
+
+    /* 4. Subsystem / Pipeline Consumers */
+    if (companion_file && strstr(companion_file, "pipeline") != NULL) {
+        *out_rel_type = strdup("pipeline_consumer");
+        *out_rec = strdup("Consumes store schema during incremental indexing.");
+        return;
+    }
+
+    /* 5. Documentation or Configuration */
+    bool c_is_doc = c_ext && (strcmp(c_ext, ".md") == 0 || strcmp(c_ext, ".json") == 0 ||
+                              strcmp(c_ext, ".yaml") == 0 || strcmp(c_ext, ".yml") == 0 ||
+                              strcmp(c_ext, ".toml") == 0);
+    if (c_is_doc) {
+        *out_rel_type = strdup("documentation_or_config");
+        *out_rec = strdup("Configuration or documentation companion. Keep specs and configuration synchronized.");
+        return;
+    }
+
+    /* 6. General Companion */
+    *out_rel_type = strdup("co_changed_companion");
+    char rec[256];
+    int pct = (int)(confidence * 100.0 + 0.5);
+    snprintf(rec, sizeof(rec), "Companion file historically committed alongside target in %d commits (%d%% confidence).",
+             co_commits, pct);
+    *out_rec = strdup(rec);
+}
+
+void cbm_store_coupled_files_result_free(cbm_coupled_files_result_t *res) {
+    if (!res) return;
+    free(res->project);
+    free(res->source_file);
+    free(res->pre_commit_warning);
+    if (res->coupled_files) {
+        for (int i = 0; i < res->companion_files_count; i++) {
+            cbm_coupled_file_item_t *item = &res->coupled_files[i];
+            free(item->file_path);
+            free(item->coupling_strength);
+            free(item->relationship_type);
+            free(item->recommendation);
+            free(item->last_seen);
+        }
+        free(res->coupled_files);
+    }
+    free(res);
+}
+
+int cbm_store_get_coupled_files(cbm_store_t *s, const char *project, const char *file_path,
+                                const cbm_coupled_files_opts_t *opts,
+                                cbm_coupled_files_result_t **out) {
+    if (!out) {
+        return CBM_STORE_ERR;
+    }
+    *out = NULL;
+    if (!s || !s->db || !project || project[0] == '\0' || !file_path || file_path[0] == '\0') {
+        return CBM_STORE_ERR;
+    }
+
+    double min_confidence = (opts && opts->min_confidence >= 0.10 && opts->min_confidence <= 1.00)
+                                ? opts->min_confidence
+                                : 0.30;
+    int limit = (opts && opts->limit > 0) ? opts->limit : 10;
+    if (limit > 50) limit = 50;
+    if (limit < 1) limit = 1;
+
+    /* Normalize target file path (strip leading ./ and normalize backslashes) */
+    char norm_path[CBM_SZ_1K];
+    snprintf(norm_path, sizeof(norm_path), "%s", file_path);
+    cbm_normalize_path_sep(norm_path);
+    const char *lookup_path = norm_path;
+    if (lookup_path[0] == '.' && (lookup_path[1] == '/' || lookup_path[1] == '\\')) {
+        lookup_path += 2;
+    }
+
+    /* 1. Verify source file exists in project nodes table */
+    const char *check_sql =
+        "SELECT id, coalesce(cast(json_extract(properties, '$.change_count') AS INTEGER), "
+        "                    cast(json_extract(properties, '$.commit_count') AS INTEGER), 0) "
+        "FROM nodes "
+        "WHERE project = ?1 AND label = 'File' AND (file_path = ?2 OR file_path = ?3) "
+        "LIMIT 1;";
+
+    sqlite3_stmt *stmt = NULL;
+    int64_t src_node_id = 0;
+    int recorded_commits = 0;
+    bool found = false;
+
+    if (sqlite3_prepare_v2(s->db, check_sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, project, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 2, lookup_path, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 3, file_path, -1, SQLITE_STATIC);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            src_node_id = sqlite3_column_int64(stmt, 0);
+            recorded_commits = sqlite3_column_int(stmt, 1);
+            found = true;
+        }
+        sqlite3_finalize(stmt);
+    }
+
+    if (!found) {
+        /* Also check if any node exists with this file_path regardless of label */
+        const char *any_sql =
+            "SELECT id FROM nodes WHERE project = ?1 AND (file_path = ?2 OR file_path = ?3) LIMIT 1;";
+        if (sqlite3_prepare_v2(s->db, any_sql, -1, &stmt, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, project, -1, SQLITE_STATIC);
+            sqlite3_bind_text(stmt, 2, lookup_path, -1, SQLITE_STATIC);
+            sqlite3_bind_text(stmt, 3, file_path, -1, SQLITE_STATIC);
+            if (sqlite3_step(stmt) == SQLITE_ROW) {
+                src_node_id = sqlite3_column_int64(stmt, 0);
+                found = true;
+            }
+            sqlite3_finalize(stmt);
+        }
+    }
+
+    if (!found) {
+        return CBM_STORE_NOT_FOUND;
+    }
+
+    cbm_coupled_files_result_t *res = calloc(1, sizeof(*res));
+    if (!res) {
+        return CBM_STORE_ERR;
+    }
+    res->project = strdup(project);
+    res->source_file = strdup(lookup_path);
+    res->total_commits_recorded = recorded_commits;
+
+    /* 2. Query bidirectional FILE_CHANGES_WITH companion files */
+    const char *query_sql =
+        "SELECT "
+        "    target_f.file_path, "
+        "    MAX(coalesce(cast(json_extract(e.properties, '$.co_commits') AS INTEGER), "
+        "                 cast(json_extract(e.properties, '$.co_changes') AS INTEGER), 1)) AS co_commits, "
+        "    MAX(coalesce(cast(json_extract(e.properties, '$.confidence') AS REAL), "
+        "                 cast(json_extract(e.properties, '$.coupling_score') AS REAL), 0.5)) AS conf, "
+        "    MAX(coalesce(json_extract(e.properties, '$.last_seen'), "
+        "                 cast(json_extract(e.properties, '$.last_co_change') AS TEXT), '')) AS last_seen "
+        "FROM nodes src_f "
+        "JOIN edges e ON (e.project = ?1 AND e.type = 'FILE_CHANGES_WITH' AND (e.source_id = src_f.id OR e.target_id = src_f.id)) "
+        "JOIN nodes target_f ON (target_f.id = CASE WHEN e.source_id = src_f.id THEN e.target_id ELSE e.source_id END) "
+        "WHERE src_f.project = ?1 "
+        "  AND (src_f.id = ?2 OR src_f.file_path = ?3) "
+        "  AND target_f.file_path != src_f.file_path "
+        "GROUP BY target_f.file_path "
+        "HAVING conf >= ?4 "
+        "ORDER BY conf DESC, co_commits DESC "
+        "LIMIT ?5;";
+
+    if (sqlite3_prepare_v2(s->db, query_sql, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, project, -1, SQLITE_STATIC);
+        sqlite3_bind_int64(stmt, 2, src_node_id);
+        sqlite3_bind_text(stmt, 3, lookup_path, -1, SQLITE_STATIC);
+        sqlite3_bind_double(stmt, 4, min_confidence);
+        sqlite3_bind_int(stmt, 5, limit);
+
+        int cap = limit > 0 ? limit : 10;
+        res->coupled_files = calloc((size_t)cap, sizeof(cbm_coupled_file_item_t));
+
+        int top_co_commits = 0;
+        double top_confidence = 0.0;
+        char top_companion[CBM_SZ_1K] = "";
+
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            const char *cf = (const char *)sqlite3_column_text(stmt, 0);
+            int co_commits = sqlite3_column_int(stmt, 1);
+            double conf = sqlite3_column_double(stmt, 2);
+            const char *ls = (const char *)sqlite3_column_text(stmt, 3);
+
+            if (res->companion_files_count >= cap) {
+                cap *= 2;
+                cbm_coupled_file_item_t *grown = realloc(res->coupled_files, (size_t)cap * sizeof(cbm_coupled_file_item_t));
+                if (grown) res->coupled_files = grown;
+            }
+
+            if (res->coupled_files && res->companion_files_count < cap) {
+                cbm_coupled_file_item_t *item = &res->coupled_files[res->companion_files_count++];
+                memset(item, 0, sizeof(*item));
+                item->file_path = strdup(cf ? cf : "");
+                item->co_commit_count = co_commits;
+                item->confidence = conf;
+                if (ls && ls[0] != '\0') {
+                    item->last_seen = strdup(ls);
+                }
+
+                if (conf >= 0.80) {
+                    item->coupling_strength = strdup("VERY HIGH");
+                } else if (conf >= 0.60) {
+                    item->coupling_strength = strdup("HIGH");
+                } else if (conf >= 0.30) {
+                    item->coupling_strength = strdup("MODERATE");
+                } else {
+                    item->coupling_strength = strdup("LOW");
+                }
+
+                cbm_classify_file_coupling(lookup_path, cf, co_commits, conf,
+                                           &item->relationship_type, &item->recommendation);
+
+                if (res->companion_files_count == 1) {
+                    top_co_commits = co_commits;
+                    top_confidence = conf;
+                    if (cf) snprintf(top_companion, sizeof(top_companion), "%s", cf);
+                }
+            }
+        }
+        sqlite3_finalize(stmt);
+
+        /* If total_commits_recorded wasn't in File node properties, derive from top companion */
+        if (res->total_commits_recorded <= 0 && top_confidence > 0.0) {
+            int est = (int)((double)top_co_commits / top_confidence + 0.5);
+            res->total_commits_recorded = est > 0 ? est : top_co_commits;
+        }
+
+        /* 3. Formulate pre_commit_warning */
+        char warn[CBM_SZ_1K];
+        if (res->companion_files_count > 0 && top_companion[0] != '\0') {
+            int pct = (int)(top_confidence * 100.0 + 0.5);
+            snprintf(warn, sizeof(warn),
+                     "Warning: Edits to '%s' usually require corresponding changes in '%s' (%d%% historical frequency).",
+                     lookup_path, top_companion, pct);
+        } else {
+            snprintf(warn, sizeof(warn),
+                     "No coupled companion files meet the minimum confidence threshold for '%s'.",
+                     lookup_path);
+        }
+        res->pre_commit_warning = strdup(warn);
+    }
+
+    *out = res;
+    return CBM_STORE_OK;
+}
+
+
