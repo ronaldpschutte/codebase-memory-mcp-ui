@@ -883,6 +883,16 @@ static const tool_def_t TOOLS[] = {
      "\"mode\":{\"type\":\"string\",\"enum\":[\"all\",\"structural\",\"semantic\"],\"default\":\"all\",\"description\":\"Filter by clone type: structural (AST MinHash), semantic (token/type overlap), or all.\"},"
      "\"limit\":{\"type\":\"integer\",\"default\":20,\"minimum\":1,\"maximum\":100,\"description\":\"Maximum number of clone pairs or clusters to return.\"}"
      "},\"required\":[\"project\"]}"},
+
+    {"get_coupled_files",
+     "Returns the 'hidden companion files' that historically commit together with a target file "
+     "based on mined git history, preventing forgotten edits and out-of-sync migrations.",
+     "{\"type\":\"object\",\"properties\":{"
+     "\"project\":{\"type\":\"string\",\"description\":\"Target project identifier registered in Codebase Memory.\"},"
+     "\"file_path\":{\"type\":\"string\",\"description\":\"Relative path of the target file being inspected or edited (e.g. 'src/store/store.c').\"},"
+     "\"min_confidence\":{\"type\":\"number\",\"default\":0.30,\"minimum\":0.10,\"maximum\":1.00,\"description\":\"Minimum co-change confidence threshold (0.10 to 1.00).\"},"
+     "\"limit\":{\"type\":\"integer\",\"default\":10,\"minimum\":1,\"maximum\":50,\"description\":\"Maximum number of coupled companion files to return.\"}"
+     "},\"required\":[\"project\",\"file_path\"]}"},
 };
 
 static const int TOOL_COUNT = sizeof(TOOLS) / sizeof(TOOLS[0]);
@@ -918,6 +928,7 @@ static const tool_annotation_def_t TOOL_ANNOTATIONS[] = {
     {"get_api_surface", true, false, true, false},
     {"audit_test_coverage", true, false, true, false},
     {"find_code_clones", true, false, true, false},
+    {"get_coupled_files", true, false, true, false},
     {"get_code_snippet", true, false, true, false},
     {"get_file_outline", true, false, true, false},
     {"get_graph_schema", true, false, true, false},
@@ -8914,6 +8925,110 @@ static char *handle_find_code_clones(cbm_mcp_server_t *srv, const char *args) {
     free(target);
     free(file_path);
     free(mode);
+
+    char *mcp_res = cbm_mcp_text_result(json, false);
+    free(json);
+    return mcp_res;
+}
+
+static char *handle_get_coupled_files(cbm_mcp_server_t *srv, const char *args) {
+    char *project = get_project_arg(args);
+    cbm_store_t *store = resolve_store(srv, project);
+    if (!store && srv && srv->store) {
+        store = srv->store;
+    }
+    REQUIRE_STORE(store, project);
+
+    char *not_indexed = verify_project_indexed(store, project);
+    if (not_indexed && srv && srv->store == store && cbm_store_count_nodes(store, project) > 0) {
+        free(not_indexed);
+        not_indexed = NULL;
+    }
+    if (not_indexed) {
+        free(project);
+        return not_indexed;
+    }
+
+    char *file_path = cbm_mcp_get_string_arg(args, "file_path");
+    if (!file_path || file_path[0] == '\0') {
+        free(project);
+        free(file_path);
+        return cbm_mcp_text_result("missing required argument 'file_path'", true);
+    }
+
+    double min_confidence = 0.30;
+    yyjson_doc *args_doc = args ? yyjson_read(args, strlen(args), 0) : NULL;
+    if (args_doc) {
+        yyjson_val *aroot = yyjson_doc_get_root(args_doc);
+        yyjson_val *mconf = yyjson_obj_get(aroot, "min_confidence");
+        if (mconf && yyjson_is_num(mconf)) {
+            min_confidence = yyjson_get_num(mconf);
+        }
+        yyjson_doc_free(args_doc);
+    }
+
+    int limit = cbm_mcp_get_int_arg(args, "limit", 10);
+
+    cbm_coupled_files_opts_t opts;
+    memset(&opts, 0, sizeof(opts));
+    opts.min_confidence = min_confidence;
+    opts.limit = limit;
+
+    cbm_coupled_files_result_t *res = NULL;
+    int rc = cbm_store_get_coupled_files(store, project, file_path, &opts, &res);
+    if (rc == CBM_STORE_NOT_FOUND) {
+        char err[CBM_SZ_512];
+        snprintf(err, sizeof(err), "file not found in project: '%s'", file_path);
+        free(project);
+        free(file_path);
+        return cbm_mcp_text_result(err, true);
+    }
+    if (rc != CBM_STORE_OK || !res) {
+        char err[CBM_SZ_512];
+        snprintf(err, sizeof(err), "failed to query coupled companion files for '%s' in project '%s'",
+                 file_path, project ? project : "");
+        free(project);
+        free(file_path);
+        return cbm_mcp_text_result(err, true);
+    }
+
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+    yyjson_mut_val *root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
+
+    yyjson_mut_obj_add_str(doc, root, "project", res->project ? res->project : (project ? project : ""));
+    yyjson_mut_obj_add_str(doc, root, "source_file", res->source_file ? res->source_file : file_path);
+    yyjson_mut_obj_add_int(doc, root, "total_commits_recorded", res->total_commits_recorded);
+    yyjson_mut_obj_add_int(doc, root, "companion_files_count", res->companion_files_count);
+
+    yyjson_mut_val *coupled_arr = yyjson_mut_arr(doc);
+    for (int i = 0; i < res->companion_files_count; i++) {
+        cbm_coupled_file_item_t *item = &res->coupled_files[i];
+        yyjson_mut_val *iobj = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_str(doc, iobj, "file_path", item->file_path ? item->file_path : "");
+        yyjson_mut_obj_add_int(doc, iobj, "co_commit_count", item->co_commit_count);
+        yyjson_mut_obj_add_real(doc, iobj, "confidence", item->confidence);
+        yyjson_mut_obj_add_str(doc, iobj, "coupling_strength",
+                               item->coupling_strength ? item->coupling_strength : "MODERATE");
+        yyjson_mut_obj_add_str(doc, iobj, "relationship_type",
+                               item->relationship_type ? item->relationship_type : "co_changed_companion");
+        yyjson_mut_obj_add_str(doc, iobj, "recommendation",
+                               item->recommendation ? item->recommendation : "");
+        if (item->last_seen && item->last_seen[0] != '\0') {
+            yyjson_mut_obj_add_str(doc, iobj, "last_seen", item->last_seen);
+        }
+        yyjson_mut_arr_add_val(coupled_arr, iobj);
+    }
+    yyjson_mut_obj_add_val(doc, root, "coupled_files", coupled_arr);
+    yyjson_mut_obj_add_str(doc, root, "pre_commit_warning",
+                           res->pre_commit_warning ? res->pre_commit_warning : "");
+
+    char *json = yy_doc_to_str(doc);
+    yyjson_mut_doc_free(doc);
+
+    cbm_store_coupled_files_result_free(res);
+    free(project);
+    free(file_path);
 
     char *mcp_res = cbm_mcp_text_result(json, false);
     free(json);
@@ -19012,6 +19127,9 @@ static char *dispatch_tool(cbm_mcp_server_t *srv, const char *tool_name, const c
     }
     if (strcmp(tool_name, "find_code_clones") == 0) {
         return handle_find_code_clones(srv, args_json);
+    }
+    if (strcmp(tool_name, "get_coupled_files") == 0) {
+        return handle_get_coupled_files(srv, args_json);
     }
 
 
