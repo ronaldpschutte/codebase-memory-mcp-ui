@@ -213,18 +213,34 @@ struct cbm_http_server {
     "style-src 'self' 'unsafe-inline'; font-src 'self' data:; "          \
     "worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'\r\n"
 
+/* CSP for the self-contained diagram pages under /diagrams/. The Diagrams tab
+ * embeds them in a same-origin <iframe>, and each page bundles its renderer as
+ * inline <script> blocks. So these pages need frame-ancestors 'self' and
+ * script-src 'unsafe-inline'. Every directive is still limited to 'self',
+ * data: or blob:, so the airgap guarantee above still holds. */
+#define CBM_DIAGRAM_CSP                                                             \
+    "Content-Security-Policy: default-src 'self'; connect-src 'self'; "             \
+    "img-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; "               \
+    "style-src 'self' 'unsafe-inline'; font-src 'self' data:; "                     \
+    "worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors " \
+    "'self'\r\n"
+
 static bool serve_embedded(cbm_http_conn_t *c, const char *path) {
     const cbm_embedded_file_t *f = cbm_embedded_lookup(path);
     if (!f)
         return false;
+
+    static const char diagram_prefix[] = "/diagrams/";
+    bool is_diagram = strncmp(path, diagram_prefix, sizeof(diagram_prefix) - 1U) == 0;
 
     /* Build headers with correct Content-Type for this asset */
     char hdrs[1024];
     snprintf(hdrs, sizeof(hdrs),
              "%sContent-Type: %s\r\n"
              "Cache-Control: public, max-age=31536000, immutable\r\n"
-             "X-Content-Type-Options: nosniff\r\n" CBM_UI_CSP,
-             g_cors, f->content_type);
+             "X-Content-Type-Options: nosniff\r\n"
+             "%s",
+             g_cors, f->content_type, is_diagram ? CBM_DIAGRAM_CSP : CBM_UI_CSP);
 
     cbm_http_reply_buf(c, 200, hdrs, f->data, (size_t)f->size);
     return true;
