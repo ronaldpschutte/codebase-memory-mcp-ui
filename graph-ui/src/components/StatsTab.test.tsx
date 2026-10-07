@@ -208,8 +208,8 @@ describe("StatsTab index modal", () => {
     expect(browseCalls()).toBe(before);
   });
 
-  it("posts empty ADR content when deleting an existing ADR", async () => {
-    let saved: unknown = null;
+  it("navigates to project tabs when clicking quick action buttons on a project card", async () => {
+    const onSelectProject = vi.fn();
     mockProjectsFetch((url, init) => {
       if (url === "/rpc") {
         const body = JSON.parse(String(init?.body));
@@ -230,32 +230,25 @@ describe("StatsTab index modal", () => {
           result: { content: [{ text: JSON.stringify(result) }] },
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
-      if (url.startsWith("/api/adr")) {
-        if (init?.method === "POST") {
-          saved = JSON.parse(String(init.body));
-          return new Response(JSON.stringify({ ok: true }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
-        return new Response(JSON.stringify({
-          has_adr: true,
-          content: "old decision text",
-          updated_at: "2026-01-01",
-        }), { status: 200, headers: { "Content-Type": "application/json" } });
-      }
       return undefined;
     });
 
-    render(<StatsTab onSelectProject={() => {}} />);
+    render(<StatsTab onSelectProject={onSelectProject} />);
+
     fireEvent.click(await screen.findByRole("button", { name: "ADR" }));
-    expect(await screen.findByDisplayValue("old decision text")).toBeInTheDocument();
+    expect(onSelectProject).toHaveBeenCalledWith("demo", "adr");
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reports" }));
+    expect(onSelectProject).toHaveBeenCalledWith("demo", "reports");
 
-    await waitFor(() => {
-      expect(saved).toEqual({ project: "demo", content: "" });
-    });
+    fireEvent.click(screen.getByRole("button", { name: "AI Readiness" }));
+    expect(onSelectProject).toHaveBeenCalledWith("demo", "readiness");
+
+    fireEvent.click(screen.getByRole("button", { name: "Diagrams" }));
+    expect(onSelectProject).toHaveBeenCalledWith("demo", "diagrams");
+
+    fireEvent.click(screen.getByRole("button", { name: "Graph" }));
+    expect(onSelectProject).toHaveBeenCalledWith("demo", "graph");
   });
 });
 
