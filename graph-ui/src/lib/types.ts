@@ -84,7 +84,42 @@ export interface SchemaInfo {
   total_edges: number;
 }
 
-export type TabId = "control" | "stats" | "diagrams" | "tools" | "graph";
+export type TabId = "control" | "stats" | "diagrams" | "tools" | "graph" | "readiness";
+
+export interface PillarScore {
+  score: number;
+  max: number;
+  status: "EXCELLENT" | "GOOD" | "NEEDS_IMPROVEMENT" | "CRITICAL";
+  findings: string[];
+}
+
+export interface Shortcoming {
+  id: string;
+  severity: "BLOCKER" | "HIGH" | "MEDIUM" | "LOW";
+  pillar: string;
+  title: string;
+  description: string;
+  remediation: string;
+  autoFixAvailable?: boolean;
+  scaffoldTemplate?: string;
+  skillTargetDir?: string;
+}
+
+export interface AIReadinessReport {
+  project: string;
+  timestamp: string;
+  score: number;
+  grade: string;
+  summary: string;
+  pillars: {
+    instructions: PillarScore;
+    skills: PillarScore;
+    graph_integrity: PillarScore;
+    test_guardrails: PillarScore;
+    hygiene: PillarScore;
+  };
+  shortcomings: Shortcoming[];
+}
 
 export interface McpToolParam {
   name: string;

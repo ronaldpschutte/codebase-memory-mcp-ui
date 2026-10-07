@@ -16,6 +16,9 @@ vi.mock("./components/DiagramsTab", () => ({
 vi.mock("./components/ToolsTab", () => ({
   ToolsTab: () => <div data-testid="tools-tab">Tools Directory</div>,
 }));
+vi.mock("./components/ReadinessTab", () => ({
+  ReadinessTab: () => <div data-testid="readiness-tab">AI Readiness</div>,
+}));
 
 vi.mock("./lib/i18n", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./lib/i18n")>();
@@ -112,5 +115,23 @@ describe("App", () => {
 
     expect(await screen.findByTestId("tools-tab")).toBeInTheDocument();
     expect(window.location.search).toContain("tab=tools");
+  });
+
+  it("renders the AI readiness navigation tab and switches to readiness view on click", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify({ lang: "en", version: "0.10.8" }), { status: 200 }),
+    ));
+
+    render(<App />);
+
+    const readinessBtn = screen.getByRole("button", { name: "AI Readiness" });
+    expect(readinessBtn).toBeInTheDocument();
+
+    await waitFor(() => {
+      fireEvent.click(readinessBtn);
+    });
+
+    expect(await screen.findByTestId("readiness-tab")).toBeInTheDocument();
+    expect(window.location.search).toContain("tab=readiness");
   });
 });

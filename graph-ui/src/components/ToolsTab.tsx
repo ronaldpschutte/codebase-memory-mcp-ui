@@ -754,6 +754,34 @@ export const MCP_TOOLS: McpToolDefinition[] = [
       2
     ),
   },
+  {
+    name: "ai_readiness_audit",
+    category: "Governance & Schema",
+    summary: "Audit repository AI readiness, score agent ergonomics (0-100), and detect missing skill runbooks",
+    description:
+      "Evaluates repository readiness for AI coding agents across 5 pillars: 1. Agent Instructions, 2. Tool & Skill Runbook Parity, 3. Knowledge Graph Integrity, 4. Test Guardrails, and 5. Code Graph Hygiene. Reports letter grades (A+ to F), identified shortcomings, and auto-scaffolds missing skills for detected project tools.",
+    readOnly: true,
+    idempotent: true,
+    parameters: [
+      { name: "project", type: "string", required: false, description: "Target project identifier or directory path" },
+      { name: "fail_under", type: "integer", required: false, description: "Minimum passing score threshold for CI gating (0-100)" },
+      { name: "format", type: "string", required: false, defaultVal: "json", enumVals: ["json", "summary"], description: "Output presentation format" },
+      { name: "scaffold", type: "string", required: false, description: "Tool ID to automatically generate a missing SKILL.md template for" },
+    ],
+    cliExample: "node scripts/audit-ai-readiness.mjs --fail-under=80",
+    jsonExample: JSON.stringify(
+      {
+        name: "ai_readiness_audit",
+        arguments: {
+          project: "{PROJECT}",
+          fail_under: 80,
+          format: "json",
+        },
+      },
+      null,
+      2
+    ),
+  },
 ];
 
 type CategoryFilter = "All" | "Code Discovery" | "Tracing & Architecture" | "Indexing & Projects" | "Governance & Schema";

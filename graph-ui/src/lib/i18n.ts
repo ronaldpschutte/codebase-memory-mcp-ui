@@ -10,6 +10,7 @@ export const messages = {
       control: "Control",
       diagrams: "Diagrams",
       tools: "Tools",
+      readiness: "AI Readiness",
     },
     common: {
       cancel: "Cancel",
@@ -98,6 +99,7 @@ export const messages = {
       control: "控制",
       diagrams: "架构图",
       tools: "工具",
+      readiness: "AI 就绪度",
     },
     common: {
       cancel: "取消",
