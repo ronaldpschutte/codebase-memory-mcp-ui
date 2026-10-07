@@ -98,3 +98,6 @@ graph-ui/src/diagrams.7z
 # Local git worktrees
 .worktrees/
 
+# Local codebase-memory cache & reports
+.codebase-memory/
+

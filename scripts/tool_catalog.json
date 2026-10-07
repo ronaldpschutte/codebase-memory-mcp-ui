@@ -1,0 +1,88 @@
+[
+  {
+    "id": "docker",
+    "name": "Docker & Containers",
+    "detectedBy": {
+      "files": ["Dockerfile", "docker-compose.yml", "docker-compose.yaml", "compose.yaml", "compose.yml", ".dockerignore"]
+    },
+    "recommendedSkill": {
+      "skillName": "docker-workflow",
+      "description": "Rules and procedures for container builds, compose services, and container debugging.",
+      "template": "---\nname: docker-workflow\ndescription: \"Procedures for managing Docker images, multi-container compose services, and container debugging.\"\n---\n\n# Docker Workflow Runbook\n\n## Verification Commands\n- Build image: `docker compose build`\n- Start services: `docker compose up -d`\n- Check container logs: `docker compose logs -f <service>`\n- Stop services: `docker compose down`\n\n## Agent Safety Rules\n- Never run `docker system prune -a` without explicit confirmation.\n- Always preserve mounted volume data during testing.\n"
+    }
+  },
+  {
+    "id": "vite-frontend",
+    "name": "Vite & React Frontend",
+    "detectedBy": {
+      "files": ["vite.config.ts", "vite.config.js"],
+      "packageDeps": ["vite"]
+    },
+    "recommendedSkill": {
+      "skillName": "frontend-dev",
+      "description": "Guidelines for Vite development server, React components, Tailwind tokens, and frontend builds.",
+      "template": "---\nname: frontend-dev\ndescription: \"Procedures for the Vite/React frontend, including dev server management, build validation, and styling conventions.\"\n---\n\n# Frontend Development Runbook\n\n## Commands\n- Dev server: `cd graph-ui && npm run dev`\n- Production build: `cd graph-ui && npm run build`\n- Run tests: `cd graph-ui && npm test`\n\n## Styling & Architecture\n- Use designated theme tokens and Lucide icons.\n- Do not break existing responsive layout rules.\n"
+    }
+  },
+  {
+    "id": "database-migrations",
+    "name": "Database & Migrations",
+    "detectedBy": {
+      "files": ["prisma/schema.prisma", "alembic.ini", "knexfile.js", "drizzle.config.ts", "migrations"]
+    },
+    "recommendedSkill": {
+      "skillName": "db-migrations",
+      "description": "Procedures for running, generating, and rolling back database migrations safely.",
+      "template": "---\nname: db-migrations\ndescription: \"Guidelines for managing database migrations, test seeding, and schema safety.\"\n---\n\n# Database Migrations Runbook\n\n## Rules\n- Always test schema rollbacks before applying.\n- Never delete production migration history.\n"
+    }
+  },
+  {
+    "id": "chrome-devtools-mcp",
+    "name": "Chrome DevTools Automation",
+    "detectedBy": {
+      "mcpServers": ["chrome-devtools-mcp"],
+      "files": [".gemini/config/plugins/chrome-devtools-plugin"]
+    },
+    "recommendedSkill": {
+      "skillName": "browser-automation",
+      "description": "Workflow for executing headless browser sessions, page navigation, and DOM inspection.",
+      "template": "---\nname: browser-automation\ndescription: \"Runbook for utilizing Chrome DevTools MCP for automated browser checks, console log inspections, and screenshots.\"\n---\n\n# Browser Automation Runbook\n\n## Best Practices\n- Use `navigate_page` with explicit wait conditions.\n- Inspect console messages with `list_console_messages` to check for frontend runtime exceptions.\n"
+    }
+  },
+  {
+    "id": "c-build-system",
+    "name": "C / Native Build System",
+    "detectedBy": {
+      "files": ["Makefile", "Makefile.cbm", "CMakeLists.txt", "compile_commands.json"]
+    },
+    "recommendedSkill": {
+      "skillName": "c-build-workflow",
+      "description": "Guidelines for compiling native C targets, running unit test runners, and checking memory safety.",
+      "template": "---\nname: c-build-workflow\ndescription: \"Runbook for building native C code, running test runners, and adhering to the Core C preference rule.\"\n---\n\n# Native C Build Runbook\n\n## Rules\n- Strictly avoid modifying Core C unless there is a demonstrable, severe performance constraint.\n- Run test suite: `make test` or `./tests/test_runner`.\n"
+    }
+  },
+  {
+    "id": "python-env",
+    "name": "Python Environment",
+    "detectedBy": {
+      "files": ["pyproject.toml", "Pipfile", "poetry.lock", "requirements.txt", "uv.lock"]
+    },
+    "recommendedSkill": {
+      "skillName": "python-workflow",
+      "description": "Procedures for virtualenv management, package installation, and test execution in Python.",
+      "template": "---\nname: python-workflow\ndescription: \"Guidelines for running Python tests, managing virtual environments, and formatting with ruff/black.\"\n---\n\n# Python Workflow Runbook\n\n## Commands\n- Run tests: `pytest`\n- Format: `ruff format .`\n- Typecheck: `mypy .`\n"
+    }
+  },
+  {
+    "id": "cloud-terraform",
+    "name": "Terraform / Cloud Infrastructure",
+    "detectedBy": {
+      "files": ["main.tf", "terraform.tfvars", "versions.tf"]
+    },
+    "recommendedSkill": {
+      "skillName": "terraform-ops",
+      "description": "Procedures for planning, linting, and formatting Terraform IaC.",
+      "template": "---\nname: terraform-ops\ndescription: \"Runbook for managing Terraform configurations, running plan verification, and avoiding state corruption.\"\n---\n\n# Terraform Ops Runbook\n\n## Safety Rules\n- Always run `terraform plan` before applying.\n- Never commit unencrypted state secrets.\n"
+    }
+  }
+]

@@ -84,7 +84,95 @@ export interface SchemaInfo {
   total_edges: number;
 }
 
-export type TabId = "control" | "stats" | "diagrams" | "tools" | "graph";
+export type TabId = "control" | "stats" | "diagrams" | "tools" | "graph" | "readiness" | "reports";
+
+export type ReportPreset = "quick" | "comprehensive" | "custom";
+
+export interface FixFirstItem {
+  rank: number;
+  symbol: string;
+  file_path: string;
+  risk_score: number;
+  reasons: string[];
+  recommended_action: string;
+}
+
+export interface ReportScore {
+  overall: number;
+  grade: string;
+  test_coverage: number;
+  hygiene: number;
+  ai_readiness: number;
+}
+
+export interface RepositoryAnalysisReport {
+  report_id: string;
+  project: string;
+  git_branch: string;
+  commit_hash: string;
+  created_at: string;
+  execution_time_ms: number;
+  preset: ReportPreset;
+  scores: ReportScore;
+  fix_first: FixFirstItem[];
+  sections: {
+    test_coverage?: any;
+    code_clones?: any;
+    dead_code?: any;
+    blast_radius?: any;
+    coupled_files?: any;
+    api_surface?: any;
+    error_flow?: any;
+    env_vars?: any;
+    ai_readiness?: AIReadinessReport;
+    [key: string]: any;
+  };
+}
+
+export interface ReportDelta {
+  overall_diff: number;
+  grade_from: string;
+  grade_to: string;
+  test_coverage_diff: number;
+  hygiene_diff: number;
+  ai_readiness_diff: number;
+  fix_first_diff: number;
+}
+
+export interface PillarScore {
+  score: number;
+  max: number;
+  status: "EXCELLENT" | "GOOD" | "NEEDS_IMPROVEMENT" | "CRITICAL";
+  findings: string[];
+}
+
+export interface Shortcoming {
+  id: string;
+  severity: "BLOCKER" | "HIGH" | "MEDIUM" | "LOW";
+  pillar: string;
+  title: string;
+  description: string;
+  remediation: string;
+  autoFixAvailable?: boolean;
+  scaffoldTemplate?: string;
+  skillTargetDir?: string;
+}
+
+export interface AIReadinessReport {
+  project: string;
+  timestamp: string;
+  score: number;
+  grade: string;
+  summary: string;
+  pillars: {
+    instructions: PillarScore;
+    skills: PillarScore;
+    graph_integrity: PillarScore;
+    test_guardrails: PillarScore;
+    hygiene: PillarScore;
+  };
+  shortcomings: Shortcoming[];
+}
 
 export interface McpToolParam {
   name: string;
