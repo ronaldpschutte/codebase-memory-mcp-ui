@@ -84,7 +84,7 @@ export interface SchemaInfo {
   total_edges: number;
 }
 
-export type TabId = "control" | "stats" | "diagrams" | "tools" | "graph" | "readiness" | "reports";
+export type TabId = "control" | "stats" | "diagrams" | "tools" | "graph" | "readiness" | "reports" | "adr";
 
 export type ReportPreset = "quick" | "comprehensive" | "custom";
 

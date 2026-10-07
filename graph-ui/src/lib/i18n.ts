@@ -12,6 +12,7 @@ export const messages = {
       tools: "Tools",
       readiness: "AI Readiness",
       reports: "Reports",
+      adr: "ADR",
     },
     common: {
       cancel: "Cancel",
@@ -102,6 +103,7 @@ export const messages = {
       tools: "工具",
       readiness: "AI 就绪度",
       reports: "分析报告",
+      adr: "架构决策 (ADR)",
     },
     common: {
       cancel: "取消",

@@ -22,6 +22,9 @@ vi.mock("./components/ReadinessTab", () => ({
 vi.mock("./components/reports/ReportsTab", () => ({
   ReportsTab: () => <div data-testid="reports-tab">Reports Tab</div>,
 }));
+vi.mock("./components/AdrTab", () => ({
+  AdrTab: () => <div data-testid="adr-tab">ADR Tab</div>,
+}));
 
 vi.mock("./lib/i18n", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./lib/i18n")>();
@@ -154,5 +157,38 @@ describe("App", () => {
 
     expect(await screen.findByTestId("reports-tab")).toBeInTheDocument();
     expect(window.location.search).toContain("tab=reports");
+  });
+
+  it("renders the ADR navigation tab and switches to ADR view on click", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify({ lang: "en", version: "0.10.8" }), { status: 200 }),
+    ));
+
+    render(<App />);
+
+    const adrBtn = screen.getByRole("button", { name: "ADR" });
+    expect(adrBtn).toBeInTheDocument();
+
+    await waitFor(() => {
+      fireEvent.click(adrBtn);
+    });
+
+    expect(await screen.findByTestId("adr-tab")).toBeInTheDocument();
+    expect(window.location.search).toContain("tab=adr");
+  });
+
+  it("renders the persistent header project switcher button", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (typeof url === "string" && url.includes("/api/projects")) {
+        return new Response(JSON.stringify([{ name: "my-project", file_count: 10, symbol_count: 50 }]), { status: 200 });
+      }
+      return new Response(JSON.stringify({ lang: "en", version: "0.10.8" }), { status: 200 });
+    }));
+
+    render(<App />);
+
+    const switcher = await screen.findByRole("button", { name: /Project All Projects/i });
+    expect(switcher).toBeInTheDocument();
+    expect(switcher).toHaveAttribute("aria-haspopup", "listbox");
   });
 });
