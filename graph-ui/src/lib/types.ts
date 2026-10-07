@@ -144,8 +144,16 @@ export interface DiagramRecommendation {
   title: string;
   type: "sequence" | "architecture" | "fragility_network" | "dataflow" | "error_flow" | "clone_clusters" | "test_coverage" | string;
   category: "behavioral" | "structural" | "quality" | "dataflow" | string;
+  subtitle?: string;
+  description?: string;
+  badgeClass?: string;
+  hoverBorderClass?: string;
+  sources?: { path: string; line?: number; label: string }[];
+  htmlFile?: string;
+  specFile?: string;
+  durationMs?: number;
   utility_score: number;
-  priority: "critical" | "high" | "medium";
+  priority: "critical" | "high" | "medium" | string;
   params: {
     type: string;
     entry_point?: string;
@@ -157,6 +165,8 @@ export interface DiagramRecommendation {
   metrics?: Record<string, any>;
   rationale: string;
   mermaid?: string;
+  spec?: any;
+  stylizedHtml?: string;
 }
 
 export interface DiagramRecommendationResult {

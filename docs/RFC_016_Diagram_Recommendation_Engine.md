@@ -286,17 +286,64 @@ graph TD
 
 ---
 
+### 4.2 Unified DiagramItem Schema & Archify Parity
+Every recommendation adheres to the exact `DiagramItem` contract used by the verified diagrams suite:
+
+```typescript
+export interface DiagramItem {
+  id: string;
+  title: string;
+  category: string;
+  subtitle: string;
+  description: string;
+  badgeClass: string;
+  hoverBorderClass: string;
+  sources: { path: string; line?: number; label: string }[];
+  htmlFile: string;
+  specFile: string;
+  durationMs: number;
+  utility_score?: number;
+  priority?: "critical" | "high" | "medium";
+  metrics?: Record<string, string | number>;
+  mermaid?: string;
+  spec?: any;
+  stylizedHtml?: string;
+}
+```
+
+### 4.3 Triple-Artifact Generation Pipeline
+When a diagram is generated (via CLI `--generate` or UI), the engine synthesizes three coordinated artifacts:
+1. `<id>.mermaid`: Clean, GitHub-renderable Mermaid AST definition.
+2. `specs/<id>.json`: Fully typed, Archify-compatible JSON-IR specification with node positions, metadata, source evidence citations, and card insights.
+3. `<id>.html`: Self-contained, rich interactive Stylized View artifact with dark theme (`#090d16`), vector SVG canvas, animated signal flow pulses, pan/zoom controls, interactive node inspector, and bottom insight cards.
+
+---
+
 ## 5. UI Integration in `graph-ui` (`DiagramsTab.tsx`)
 
-In [graph-ui/src/components/DiagramsTab.tsx](file:///c:/AI/Source/codebase-memory-mcp-ui/graph-ui/src/components/DiagramsTab.tsx), the user experience will be upgraded from a static list of 6 pre-baked diagrams to a dynamic, project-aware diagram studio:
+In [graph-ui/src/components/DiagramsTab.tsx](file:///c:/AI/Source/codebase-memory-mcp-ui/graph-ui/src/components/DiagramsTab.tsx), recommended diagrams are first-class peers to the verified diagrams suite, sharing the **identical visual presentation and interactive viewer experience**:
 
-1. **"Recommended for this Project" Banner**:
-   - Appears prominently at the top of the Diagrams Tab when a project is selected.
-   - Shows badge pills: `Score 96 • Behavioral`, `Score 88 • Fragility`, etc.
-2. **Instant "Generate & View" Button**:
-   - Clicking a recommendation immediately passes its parameters into `export_diagram` or the dynamic Mermaid renderer and mounts the interactive viewer.
-3. **Save to Project Diagrams**:
-   - Users can pin generated diagrams directly into the project's documentation catalog.
+### 5.1 Gallery & Overview Mode
+- **Sub-Tab Navigation**: Seamless switching between "Verified Architecture Suite (6)" and "Recommended for this Project (RFC 016)".
+- **Identical Card Structure**:
+  - Category Badge + Priority / Utility Score Flame Chip.
+  - Title, Subtitle, and Description.
+  - Source Citations Box: Exact repository file paths and line numbers (`path:line`) with architectural labels.
+  - Key Metrics Chips (Fan-out, Callee files, Coupling strength, Co-changes, Clone lines).
+  - Launch Action: "Launch Interactive Viewer" with hover transition.
+
+### 5.2 Multi-Mode Interactive Viewer
+Clicking any diagram card (verified or recommended) launches the identical viewer stage:
+1. **Viewer Subheader Bar**:
+   - Category badge, title, subtitle / description, Gate Pass / Utility Score, and duration SLA in milliseconds.
+2. **Dual-Surface View Switcher**:
+   - **Stylized Canvas**: Interactive stylized SVG canvas matching the original Archify aesthetic with responsive pan/zoom, interactive node click inspector, glowing accents, animated signal flows, and bottom metric cards.
+   - **Mermaid AST**: Clean, dark-mode Mermaid AST view via iframe preview.
+3. **Spec Drawer**:
+   - Collapsible slide-out drawer on the right rendering the exact Archify JSON specification with source citations and evidence.
+4. **Standalone & Fullscreen Actions**:
+   - "Open Standalone": Opens the self-contained `.html` artifact in a new tab.
+   - "Fullscreen": Expands the canvas across the entire display.
 
 ---
 

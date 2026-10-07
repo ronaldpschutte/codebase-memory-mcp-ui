@@ -13,10 +13,16 @@ import {
   BookOpen,
 } from "lucide-react";
 import { DiagramRecommendations } from "./DiagramRecommendations";
+import {
+  DEFAULT_RECOMMENDED_DIAGRAMS,
+  generateStylizedDiagramHtml,
+  generateArchifySpecJson,
+} from "../lib/stylizedDiagram";
 
 export interface DiagramItem {
   id: string;
   title: string;
+  type?: string;
   category: string;
   subtitle: string;
   description: string;
@@ -26,6 +32,12 @@ export interface DiagramItem {
   htmlFile: string;
   specFile: string;
   durationMs: number;
+  utility_score?: number;
+  priority?: "critical" | "high" | "medium";
+  metrics?: Record<string, any>;
+  mermaid?: string;
+  spec?: any;
+  stylizedHtml?: string;
 }
 
 export const DIAGRAMS: DiagramItem[] = [
@@ -401,6 +413,7 @@ interface DiagramsTabProps {
 export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }: DiagramsTabProps) {
   const [selectedId, setSelectedId] = useState<string | null>(initialDiagram || null);
   const [gallerySubTab, setGallerySubTab] = useState<"verified" | "recommended">("verified");
+  const [recommendedList, setRecommendedList] = useState<DiagramItem[]>(DEFAULT_RECOMMENDED_DIAGRAMS as DiagramItem[]);
   const [viewMode, setViewMode] = useState<"stylized" | "mermaid">("stylized");
   const [diagramHtml, setDiagramHtml] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -415,9 +428,52 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }
     }
   }, [initialDiagram]);
 
+  // Fetch dynamic recommendations if available
+  useEffect(() => {
+    if (!selectedProject) return;
+    fetch(`/api/recommend-diagrams?project=${encodeURIComponent(selectedProject)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.recommendations && Array.isArray(data.recommendations) && data.recommendations.length > 0) {
+          const enriched: DiagramItem[] = data.recommendations.map((r: any) => ({
+            ...r,
+            subtitle: r.subtitle || r.rationale,
+            description: r.description || r.rationale,
+            badgeClass: r.badgeClass || (
+              r.priority === "critical"
+                ? "bg-rose-500/15 text-rose-400 border-rose-500/30"
+                : r.priority === "high"
+                  ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                  : "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+            ),
+            hoverBorderClass: r.hoverBorderClass || (
+              r.priority === "critical"
+                ? "hover:border-rose-500/50 hover:shadow-rose-500/10"
+                : r.priority === "high"
+                  ? "hover:border-amber-500/50 hover:shadow-amber-500/10"
+                  : "hover:border-emerald-500/50 hover:shadow-emerald-500/10"
+            ),
+            sources: r.sources || [{ path: r.metrics?.file_path || "src/main.c", line: 1, label: r.title }],
+            htmlFile: r.htmlFile || `${r.id}.html`,
+            specFile: r.specFile || `specs/${r.id}.json`,
+            durationMs: r.durationMs || 6,
+            stylizedHtml: r.stylizedHtml || generateStylizedDiagramHtml(r),
+            spec: r.spec || generateArchifySpecJson(r),
+          }));
+          setRecommendedList(enriched);
+        }
+      })
+      .catch(() => {});
+  }, [selectedProject]);
+
+  const allDiagrams = useMemo(
+    () => [...DIAGRAMS, ...recommendedList],
+    [recommendedList]
+  );
+
   const activeDiagram = useMemo(
-    () => DIAGRAMS.find((d) => d.id === selectedId) || null,
-    [selectedId]
+    () => allDiagrams.find((d) => d.id === selectedId) || null,
+    [allDiagrams, selectedId]
   );
 
   const selectDiagram = (id: string | null) => {
@@ -426,7 +482,7 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }
     onSelectDiagram?.(id);
   };
 
-  // Load verified diagram when active diagram changes
+  // Load active diagram specs and html
   useEffect(() => {
     if (!activeDiagram) {
       setDiagramHtml(null);
@@ -436,35 +492,31 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }
 
     setLoading(true);
 
-    // Fetch verified Archify spec JSON
-    fetch(`/diagrams/${activeDiagram.specFile}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then((data) => {
-        setSpecContent(JSON.stringify(data, null, 2));
-      })
-      .catch((_err) => {
-        const mermaidCode = REPO_MERMAID_DIAGRAMS[activeDiagram.id];
-        setSpecContent(
-          JSON.stringify(
-            {
-              diagram: activeDiagram.id,
-              title: activeDiagram.title,
-              category: activeDiagram.category,
-              repository: "codebase-memory-mcp-ui",
-              evidence: activeDiagram.sources,
-              mermaid_definition: mermaidCode,
-            },
-            null,
-            2
-          )
-        );
-      });
+    // Fetch or generate Archify spec JSON
+    if (activeDiagram.spec) {
+      setSpecContent(
+        typeof activeDiagram.spec === "string"
+          ? activeDiagram.spec
+          : JSON.stringify(activeDiagram.spec, null, 2)
+      );
+    } else if (activeDiagram.specFile) {
+      fetch(`/diagrams/${activeDiagram.specFile}`)
+        .then((res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        })
+        .then((data) => {
+          setSpecContent(JSON.stringify(data, null, 2));
+        })
+        .catch((_err) => {
+          setSpecContent(generateArchifySpecJson(activeDiagram));
+        });
+    } else {
+      setSpecContent(generateArchifySpecJson(activeDiagram));
+    }
 
     // Prepare mermaid HTML for mermaid view mode
-    const mermaidCode = REPO_MERMAID_DIAGRAMS[activeDiagram.id];
+    const mermaidCode = activeDiagram.mermaid || REPO_MERMAID_DIAGRAMS[activeDiagram.id];
     if (mermaidCode) {
       setDiagramHtml(generateMermaidHtml(activeDiagram.title, mermaidCode));
     } else {
@@ -477,7 +529,13 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }
   const handleOpenStandalone = () => {
     if (!activeDiagram) return;
     if (viewMode === "stylized") {
-      window.open(`/diagrams/${activeDiagram.htmlFile}?theme=dark`, "_blank");
+      if (activeDiagram.stylizedHtml) {
+        const blob = new Blob([activeDiagram.stylizedHtml], { type: "text/html" });
+        const url = URL.createObjectURL(blob);
+        window.open(url, "_blank");
+      } else {
+        window.open(`/diagrams/${activeDiagram.htmlFile}?theme=dark`, "_blank");
+      }
     } else if (diagramHtml) {
       const blob = new Blob([diagramHtml], { type: "text/html" });
       const url = URL.createObjectURL(blob);
@@ -528,7 +586,7 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }
 
           <div className="h-4 w-px bg-border/40 mx-1" />
 
-          {DIAGRAMS.map((d) => {
+          {(gallerySubTab === "recommended" ? recommendedList : DIAGRAMS).map((d) => {
             const isSelected = selectedId === d.id;
             return (
               <button
@@ -817,9 +875,15 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }
                 </span>
               </div>
               <div className="flex items-center gap-3 shrink-0 font-mono text-[11px]">
-                <span className="text-emerald-400 flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" /> Gate Pass
-                </span>
+                {activeDiagram.utility_score ? (
+                  <span className="text-primary flex items-center gap-1 font-bold">
+                    <Sparkles className="w-3 h-3 text-primary" /> Score {activeDiagram.utility_score}/100
+                  </span>
+                ) : (
+                  <span className="text-emerald-400 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" /> Gate Pass
+                  </span>
+                )}
                 <span className="text-foreground/30">|</span>
                 <span>{activeDiagram.durationMs}ms</span>
               </div>
@@ -831,7 +895,7 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }
                 <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#090d16]/80 backdrop-blur-sm gap-3">
                   <div className="w-7 h-7 border-2 border-primary border-t-transparent rounded-full animate-spin" />
                   <p className="text-xs text-muted-foreground font-mono">
-                    Rendering verified diagram...
+                    Rendering stylized diagram...
                   </p>
                 </div>
               )}
@@ -840,7 +904,8 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }
                 <iframe
                   key={`stylized-${activeDiagram.id}`}
                   title={activeDiagram.title}
-                  src={`/diagrams/${activeDiagram.htmlFile}?theme=dark`}
+                  srcDoc={activeDiagram.stylizedHtml || undefined}
+                  src={activeDiagram.stylizedHtml ? undefined : `/diagrams/${activeDiagram.htmlFile}?theme=dark`}
                   className="w-full h-full border-0"
                   sandbox="allow-scripts allow-same-origin allow-popups"
                 />

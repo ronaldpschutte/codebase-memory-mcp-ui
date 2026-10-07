@@ -80,19 +80,25 @@ export async function main() {
     minScore: options.minScore
   });
 
-  // If --generate is requested, write .mermaid files
+  // If --generate is requested, write .mermaid, specs/*.json, and stylized .html files
   if (options.generate && result.recommendations.length > 0) {
     const targetDir = path.join(process.cwd(), ".codebase-memory", "diagrams", project);
+    const specsDir = path.join(targetDir, "specs");
     fs.mkdirSync(targetDir, { recursive: true });
+    fs.mkdirSync(specsDir, { recursive: true });
 
     for (const r of result.recommendations) {
       if (r.mermaid) {
-        const fileName = `${r.id}.mermaid`;
-        const filePath = path.join(targetDir, fileName);
-        fs.writeFileSync(filePath, r.mermaid, "utf8");
+        fs.writeFileSync(path.join(targetDir, `${r.id}.mermaid`), r.mermaid, "utf8");
+      }
+      if (r.spec) {
+        fs.writeFileSync(path.join(specsDir, `${r.id}.json`), JSON.stringify(r.spec, null, 2), "utf8");
+      }
+      if (r.stylizedHtml) {
+        fs.writeFileSync(path.join(targetDir, `${r.id}.html`), r.stylizedHtml, "utf8");
       }
     }
-    console.error(`[recommend-diagrams] Generated ${result.recommendations.length} diagram files in ${targetDir}`);
+    console.error(`[recommend-diagrams] Generated ${result.recommendations.length} complete diagram suites (.mermaid, .json spec, and stylized .html) in ${targetDir}`);
   }
 
   let outputText = "";
