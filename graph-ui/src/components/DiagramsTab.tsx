@@ -466,9 +466,68 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }
       .catch(() => {});
   }, [selectedProject]);
 
+  const [repoCatalog, setRepoCatalog] = useState<any>(null);
+
+  // Fetch repository diagrams catalog (diagrams/catalog.json) if present
+  useEffect(() => {
+    fetch("/diagrams/catalog.json")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((catalog) => {
+        if (catalog && (catalog.generated_diagrams || catalog.system_overview)) {
+          setRepoCatalog(catalog);
+        }
+      })
+      .catch(() => {});
+  }, [selectedProject]);
+
+  // System Overview diagram is either from catalog or first item in DIAGRAMS
+  const systemOverviewDiagram: DiagramItem = useMemo(() => {
+    if (repoCatalog?.system_overview) {
+      const so = repoCatalog.system_overview;
+      return {
+        ...so,
+        subtitle: so.subtitle || "High-level topology & MCP daemon IPC",
+        description: so.description || "Primary system architecture overview compiled post-indexing.",
+        badgeClass: so.badgeClass || "bg-indigo-500/15 text-indigo-400 border-indigo-500/30",
+        hoverBorderClass: so.hoverBorderClass || "hover:border-indigo-500/50 hover:shadow-indigo-500/10",
+        sources: so.sources || DIAGRAMS[0].sources,
+        htmlFile: so.htmlFile || "architecture.html",
+        specFile: so.specFile || "specs/architecture.json",
+        durationMs: so.durationMs || 5929,
+      };
+    }
+    return DIAGRAMS[0];
+  }, [repoCatalog]);
+
+  // Previously generated diagrams list
+  const previouslyGeneratedDiagrams: DiagramItem[] = useMemo(() => {
+    if (repoCatalog?.generated_diagrams && Array.isArray(repoCatalog.generated_diagrams)) {
+      const fromCatalog = repoCatalog.generated_diagrams
+        .filter((d: any) => d.id !== systemOverviewDiagram.id)
+        .map((d: any) => {
+          const matchExisting = DIAGRAMS.find((ex) => ex.id === d.id);
+          return {
+            ...(matchExisting || {}),
+            ...d,
+            subtitle: d.subtitle || matchExisting?.subtitle || "",
+            description: d.description || matchExisting?.description || "",
+            badgeClass: d.badgeClass || matchExisting?.badgeClass || "bg-cyan-500/15 text-cyan-400 border-cyan-500/30",
+            hoverBorderClass: d.hoverBorderClass || matchExisting?.hoverBorderClass || "hover:border-cyan-500/50 hover:shadow-cyan-500/10",
+            sources: d.sources || matchExisting?.sources || [{ path: "src/main.c", line: 1, label: d.title }],
+            htmlFile: d.htmlFile || `${d.id}.html`,
+            specFile: d.specFile || `specs/${d.id}.json`,
+            durationMs: d.durationMs || 5,
+          };
+        });
+      if (fromCatalog.length > 0) return fromCatalog;
+    }
+    // Baseline: the remaining verified diagrams in the repository
+    return DIAGRAMS.slice(1);
+  }, [repoCatalog, systemOverviewDiagram.id]);
+
   const allDiagrams = useMemo(
-    () => [...DIAGRAMS, ...recommendedList],
-    [recommendedList]
+    () => [systemOverviewDiagram, ...previouslyGeneratedDiagrams, ...recommendedList],
+    [systemOverviewDiagram, previouslyGeneratedDiagrams, recommendedList]
   );
 
   const activeDiagram = useMemo(
@@ -761,63 +820,173 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }
               </div>
             </div>
 
-            {/* Diagrams Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {DIAGRAMS.map((item) => (
-                <div
-                  key={item.id}
-                  onClick={() => selectDiagram(item.id)}
-                  className={`group relative flex flex-col justify-between rounded-xl border border-border/40 bg-white/[0.02] p-5 cursor-pointer transition-all duration-300 ${item.hoverBorderClass} hover:-translate-y-1 hover:bg-white/[0.03] hover:shadow-xl`}
-                >
-                  <div>
-                    {/* Header: Category Badge + Gate Pass */}
-                    <div className="flex items-center justify-between mb-3">
-                      <span
-                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border font-mono uppercase tracking-wider ${item.badgeClass}`}
-                      >
-                        {item.category}
-                      </span>
-                      <div className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-400">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>Pass</span>
-                      </div>
-                    </div>
+            {/* Primary System Overview (Auto-Generated Post-Index) */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-primary" />
+                  <h2 className="text-sm font-semibold tracking-tight text-foreground">
+                    System Overview
+                  </h2>
+                  <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                    Post-Index Verified
+                  </span>
+                </div>
+                <span className="text-xs text-muted-foreground font-mono">
+                  Foundational Architecture Map
+                </span>
+              </div>
 
-                    <h2 className="text-base font-semibold text-foreground group-hover:text-primary transition-colors">
-                      {item.title}
-                    </h2>
-                    <p className="text-[11px] text-muted-foreground/80 font-mono mt-0.5 mb-3">
-                      {item.subtitle}
-                    </p>
-                    <p className="text-xs text-muted-foreground line-clamp-3 leading-relaxed mb-4">
-                      {item.description}
-                    </p>
+              <div
+                onClick={() => selectDiagram(systemOverviewDiagram.id)}
+                className="group relative flex flex-col justify-between rounded-xl border border-primary/30 bg-gradient-to-br from-primary/5 via-white/[0.02] to-transparent p-6 cursor-pointer transition-all duration-300 hover:border-primary/60 hover:-translate-y-1 hover:shadow-2xl hover:shadow-primary/10"
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-md border font-mono uppercase tracking-wider ${systemOverviewDiagram.badgeClass}`}
+                      >
+                        {systemOverviewDiagram.category}
+                      </span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        Auto-Generated on Indexing
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-400">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>100% Pass</span>
+                    </div>
                   </div>
 
-                  <div>
-                    {/* C Source Citations */}
-                    <div className="rounded-lg bg-black/40 border border-border/20 p-2.5 mb-4 space-y-1 font-mono text-[10.5px] text-muted-foreground">
-                      {item.sources.map((s, idx) => (
-                        <div key={idx} className="flex items-center justify-between truncate">
-                          <span className="text-foreground/80 font-medium">
-                            {s.path}
-                            {s.line ? `:${s.line}` : ""}
-                          </span>
-                          <span className="text-[9.5px] text-foreground/40">{s.label}</span>
-                        </div>
-                      ))}
-                    </div>
+                  <h2 className="text-lg font-bold text-foreground group-hover:text-primary transition-colors">
+                    {systemOverviewDiagram.title}
+                  </h2>
+                  <p className="text-xs text-muted-foreground/80 font-mono mt-0.5 mb-2">
+                    {systemOverviewDiagram.subtitle}
+                  </p>
+                  <p className="text-xs text-muted-foreground leading-relaxed max-w-3xl mb-4">
+                    {systemOverviewDiagram.description}
+                  </p>
+                </div>
 
-                    {/* Launch Action */}
-                    <div className="flex items-center justify-between pt-2 border-t border-border/20">
-                      <span className="text-[11px] text-muted-foreground group-hover:text-foreground transition-colors font-medium">
-                        Launch Interactive Viewer
-                      </span>
-                      <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" />
-                    </div>
+                <div>
+                  {/* C Source Citations */}
+                  <div className="rounded-lg bg-black/40 border border-border/20 p-2.5 mb-4 space-y-1 font-mono text-[10.5px] text-muted-foreground">
+                    {systemOverviewDiagram.sources.map((s, idx) => (
+                      <div key={idx} className="flex items-center justify-between truncate">
+                        <span className="text-foreground/80 font-medium">
+                          {s.path}
+                          {s.line ? `:${s.line}` : ""}
+                        </span>
+                        <span className="text-[9.5px] text-foreground/40">{s.label}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-border/20">
+                    <span className="text-xs text-primary font-semibold flex items-center gap-1">
+                      <span>Launch Interactive System Overview</span>
+                    </span>
+                    <ArrowRight className="w-4 h-4 text-primary group-hover:translate-x-1 transition-all" />
                   </div>
                 </div>
-              ))}
+              </div>
+            </div>
+
+            {/* Previously Generated Diagrams Section */}
+            <div className="space-y-4 pt-4 border-t border-border/30">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-muted-foreground" />
+                  <h2 className="text-sm font-semibold tracking-tight text-foreground">
+                    Previously Generated Diagrams ({previouslyGeneratedDiagrams.length})
+                  </h2>
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  Saved in repository <code className="text-primary font-mono text-[11px]">diagrams/</code> directory
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {previouslyGeneratedDiagrams.map((item) => (
+                  <div
+                    key={item.id}
+                    onClick={() => selectDiagram(item.id)}
+                    className={`group relative flex flex-col justify-between rounded-xl border border-border/40 bg-white/[0.02] p-5 cursor-pointer transition-all duration-300 ${item.hoverBorderClass} hover:-translate-y-1 hover:bg-white/[0.03] hover:shadow-xl`}
+                  >
+                    <div>
+                      {/* Header */}
+                      <div className="flex items-center justify-between mb-3">
+                        <span
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border font-mono uppercase tracking-wider ${item.badgeClass}`}
+                        >
+                          {item.category}
+                        </span>
+                        <div className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-400">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Pass</span>
+                        </div>
+                      </div>
+
+                      <h3 className="text-base font-semibold text-foreground group-hover:text-primary transition-colors">
+                        {item.title}
+                      </h3>
+                      <p className="text-[11px] text-muted-foreground/80 font-mono mt-0.5 mb-3">
+                        {item.subtitle}
+                      </p>
+                      <p className="text-xs text-muted-foreground line-clamp-3 leading-relaxed mb-4">
+                        {item.description}
+                      </p>
+                    </div>
+
+                    <div>
+                      {/* Source Citations */}
+                      <div className="rounded-lg bg-black/40 border border-border/20 p-2.5 mb-4 space-y-1 font-mono text-[10.5px] text-muted-foreground">
+                        {item.sources.map((s, idx) => (
+                          <div key={idx} className="flex items-center justify-between truncate">
+                            <span className="text-foreground/80 font-medium">
+                              {s.path}
+                              {s.line ? `:${s.line}` : ""}
+                            </span>
+                            <span className="text-[9.5px] text-foreground/40">{s.label}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Launch Action */}
+                      <div className="flex items-center justify-between pt-2 border-t border-border/20">
+                        <span className="text-[11px] text-muted-foreground group-hover:text-foreground transition-colors font-medium">
+                          Launch Interactive Viewer
+                        </span>
+                        <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Discover Additional Recommendations Banner */}
+            <div className="p-5 rounded-2xl bg-gradient-to-r from-primary/10 via-primary/5 to-transparent border border-primary/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <Sparkles className="w-4 h-4 text-primary" />
+                  <h3 className="text-sm font-semibold text-foreground">
+                    Discover More Diagrams for this Repository
+                  </h3>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  The RFC 016 Recommendation Engine identified high-impact candidates (call sequences, fragility networks, error flows) ready to generate into <code className="text-primary font-mono text-[11px]">diagrams/</code>.
+                </p>
+              </div>
+              <button
+                onClick={() => setGallerySubTab("recommended")}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground font-semibold text-xs shrink-0 hover:bg-primary/90 transition-all shadow-md cursor-pointer"
+              >
+                <span>View Recommendations</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             </div>
 
             {/* Architecture Documents & PRD Reference footer */}

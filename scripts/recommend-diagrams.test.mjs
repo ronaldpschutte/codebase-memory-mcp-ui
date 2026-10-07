@@ -6,7 +6,10 @@ import {
   recommendDiagramsForProject,
   getFallbackRecommendations,
   renderRecommendationsMarkdown,
-  resolveProjectDbPath
+  resolveProjectDbPath,
+  runPostIndexSystemOverview,
+  writeRepoDiagramSuite,
+  loadRepoDiagramsCatalog
 } from "./recommend_engine.mjs";
 
 describe("recommend_engine", () => {
@@ -86,4 +89,52 @@ describe("recommend_engine", () => {
       assert.ok(r.mermaid);
     }
   });
+
+  it("checks and creates repo diagrams directory and writes triple-artifact suite with catalog", () => {
+    const tmpDir = path.join(process.cwd(), ".tmp-test-repo-" + Date.now());
+    try {
+      fs.mkdirSync(tmpDir, { recursive: true });
+
+      // Run post-index System Overview
+      const { diagramsDir, systemOverview, catalog } = runPostIndexSystemOverview(tmpDir, "test-tmp-proj");
+      assert.ok(fs.existsSync(diagramsDir));
+      assert.ok(fs.existsSync(path.join(diagramsDir, "specs")));
+      assert.ok(fs.existsSync(path.join(diagramsDir, "architecture.mermaid")));
+      assert.ok(fs.existsSync(path.join(diagramsDir, "specs", "architecture.json")));
+      assert.ok(fs.existsSync(path.join(diagramsDir, "architecture.html")));
+      assert.ok(fs.existsSync(path.join(diagramsDir, "catalog.json")));
+
+      assert.equal(systemOverview.id, "architecture");
+      assert.equal(systemOverview.is_system_overview, true);
+      assert.ok(catalog.system_overview);
+      assert.equal(catalog.generated_diagrams.length, 1);
+
+      // Write another diagram suite
+      const mockDiagram = {
+        id: "seq-test-flow",
+        title: "Test Sequence Flow",
+        category: "behavioral",
+        type: "sequence",
+        utility_score: 91,
+        priority: "high",
+        mermaid: "sequenceDiagram\n  A->>B: ping()",
+        spec: { title: "Test Sequence Flow" },
+        stylizedHtml: "<html><body>Test</body></html>",
+      };
+
+      const res = writeRepoDiagramSuite(tmpDir, mockDiagram, false);
+      assert.ok(fs.existsSync(path.join(diagramsDir, "seq-test-flow.mermaid")));
+      assert.ok(fs.existsSync(path.join(diagramsDir, "specs", "seq-test-flow.json")));
+      assert.ok(fs.existsSync(path.join(diagramsDir, "seq-test-flow.html")));
+
+      const updatedCatalog = loadRepoDiagramsCatalog(tmpDir);
+      assert.equal(updatedCatalog.generated_diagrams.length, 2);
+      assert.ok(updatedCatalog.generated_diagrams.some(d => d.id === "seq-test-flow"));
+    } finally {
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch {}
+    }
+  });
 });
+

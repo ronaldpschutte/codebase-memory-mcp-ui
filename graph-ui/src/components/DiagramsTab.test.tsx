@@ -160,6 +160,16 @@ describe("DiagramsTab", () => {
 
     expect(screen.getByTitle("Call Sequence: extract_file_ex_body")).toBeInTheDocument();
   });
+
+  it("renders System Overview hero card and Previously Generated Diagrams section on the overview screen", () => {
+    render(<DiagramsTab />);
+
+    expect(screen.getByRole("heading", { name: "System Overview" })).toBeInTheDocument();
+    expect(screen.getByText("Post-Index Verified")).toBeInTheDocument();
+    expect(screen.getByText(/Previously Generated Diagrams/i)).toBeInTheDocument();
+    expect(screen.getByText(/Saved in repository/i)).toBeInTheDocument();
+    expect(screen.getByText("Launch Interactive System Overview")).toBeInTheDocument();
+  });
 });
 
 

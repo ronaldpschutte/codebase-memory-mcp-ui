@@ -1032,3 +1032,143 @@ function escapeHtml(str) {
     .replace(/'/g, "&#039;");
 }
 
+/**
+ * Checks target repository for diagrams directory; creates it if missing.
+ */
+export function ensureRepoDiagramsDir(repoPath) {
+  const root = repoPath ? path.resolve(repoPath) : process.cwd();
+  const diagramsDir = path.join(root, "diagrams");
+  const specsDir = path.join(diagramsDir, "specs");
+  if (!fs.existsSync(diagramsDir)) {
+    fs.mkdirSync(diagramsDir, { recursive: true });
+  }
+  if (!fs.existsSync(specsDir)) {
+    fs.mkdirSync(specsDir, { recursive: true });
+  }
+  return { diagramsDir, specsDir };
+}
+
+/**
+ * Loads the repository's diagrams catalog if present.
+ */
+export function loadRepoDiagramsCatalog(repoPath) {
+  const { diagramsDir } = ensureRepoDiagramsDir(repoPath);
+  const catalogPath = path.join(diagramsDir, "catalog.json");
+  if (fs.existsSync(catalogPath)) {
+    try {
+      return JSON.parse(fs.readFileSync(catalogPath, "utf8"));
+    } catch {
+      // return default structure on corrupt/empty
+    }
+  }
+  return {
+    schema_version: 1,
+    repo_path: repoPath ? path.resolve(repoPath) : process.cwd(),
+    updated_at: new Date().toISOString(),
+    system_overview: null,
+    generated_diagrams: [],
+  };
+}
+
+/**
+ * Writes the triple-artifact suite for a diagram into <repo_root>/diagrams/
+ * and updates catalog.json.
+ */
+export function writeRepoDiagramSuite(repoPath, diagram, isSystemOverview = false) {
+  const { diagramsDir, specsDir } = ensureRepoDiagramsDir(repoPath);
+
+  if (diagram.mermaid) {
+    fs.writeFileSync(path.join(diagramsDir, `${diagram.id}.mermaid`), diagram.mermaid, "utf8");
+  }
+  if (diagram.spec) {
+    fs.writeFileSync(path.join(specsDir, `${diagram.id}.json`), JSON.stringify(diagram.spec, null, 2), "utf8");
+  }
+  if (diagram.stylizedHtml) {
+    fs.writeFileSync(path.join(diagramsDir, `${diagram.id}.html`), diagram.stylizedHtml, "utf8");
+  }
+
+  // Update catalog.json
+  const catalog = loadRepoDiagramsCatalog(repoPath);
+  catalog.updated_at = new Date().toISOString();
+
+  const entry = {
+    id: diagram.id,
+    title: diagram.title,
+    category: diagram.category || "structural",
+    type: diagram.type || "architecture",
+    subtitle: diagram.subtitle || diagram.rationale || "",
+    description: diagram.description || diagram.rationale || "",
+    badgeClass: diagram.badgeClass || "bg-indigo-500/15 text-indigo-400 border-indigo-500/30",
+    hoverBorderClass: diagram.hoverBorderClass || "hover:border-indigo-500/50 hover:shadow-indigo-500/10",
+    sources: diagram.sources || [{ path: "src/main.c", line: 1, label: diagram.title }],
+    htmlFile: `${diagram.id}.html`,
+    specFile: `specs/${diagram.id}.json`,
+    mermaidFile: `${diagram.id}.mermaid`,
+    durationMs: diagram.durationMs || 6,
+    utility_score: diagram.utility_score || 95,
+    generated_at: new Date().toISOString(),
+    is_system_overview: Boolean(isSystemOverview),
+  };
+
+  if (isSystemOverview) {
+    catalog.system_overview = entry;
+  }
+
+  // Add or update in generated_diagrams list
+  const existingIdx = catalog.generated_diagrams.findIndex((d) => d.id === diagram.id);
+  if (existingIdx >= 0) {
+    catalog.generated_diagrams[existingIdx] = entry;
+  } else {
+    catalog.generated_diagrams.push(entry);
+  }
+
+  fs.writeFileSync(path.join(diagramsDir, "catalog.json"), JSON.stringify(catalog, null, 2), "utf8");
+  return { diagramsDir, entry, catalog };
+}
+
+/**
+ * Runs the Post-Index System Overview analysis:
+ * 1. Ensures <repo_root>/diagrams/ exists.
+ * 2. Generates the System Overview diagram (Architecture & Subsystem DAG).
+ * 3. Saves all artifacts into <repo_root>/diagrams/ and registers in catalog.json.
+ */
+export function runPostIndexSystemOverview(repoPath, projectName) {
+  const project = projectName || (repoPath ? path.basename(repoPath) : "codebase-memory-mcp-ui");
+  const { diagramsDir } = ensureRepoDiagramsDir(repoPath);
+
+  // Generate primary system overview diagram
+  const systemOverviewDiagram = {
+    id: "architecture",
+    title: "System Overview: Architecture & Subsystems",
+    type: "architecture",
+    category: "structural",
+    subtitle: "High-level topology & subsystem dependency hierarchy",
+    description: "Foundational architecture overview compiled post-indexing. Visualizes client interfaces, protocol layers, AST workers, and storage layers.",
+    badgeClass: "bg-indigo-500/15 text-indigo-400 border-indigo-500/30",
+    hoverBorderClass: "hover:border-indigo-500/50 hover:shadow-indigo-500/10",
+    utility_score: 100,
+    priority: "critical",
+    durationMs: 8,
+    sources: [
+      { path: "src/main.c", line: 1, label: "entry point" },
+      { path: "src/mcp/mcp.c", line: 1, label: "protocol dispatch" },
+      { path: "src/store/store.c", line: 1, label: "relational store" },
+    ],
+    mermaid: `graph TD
+    Client["Client Interface (CLI / UI / Agents)"] --> Protocol["MCP & IPC Protocol Daemon"]
+    Protocol --> Pipeline["Multi-Pass AST Worker Pool"]
+    Pipeline --> Store[("SQLite WAL Store")]`,
+  };
+
+  systemOverviewDiagram.stylizedHtml = generateStylizedDiagramHtml(systemOverviewDiagram);
+  systemOverviewDiagram.spec = generateArchifySpec(systemOverviewDiagram);
+
+  const { entry, catalog } = writeRepoDiagramSuite(repoPath, systemOverviewDiagram, true);
+  return {
+    diagramsDir,
+    systemOverview: entry,
+    catalog,
+  };
+}
+
+

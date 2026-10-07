@@ -4,12 +4,18 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   recommendDiagramsForProject,
-  renderRecommendationsMarkdown
+  renderRecommendationsMarkdown,
+  ensureRepoDiagramsDir,
+  writeRepoDiagramSuite,
+  runPostIndexSystemOverview,
+  loadRepoDiagramsCatalog
 } from "./recommend_engine.mjs";
 
 function parseArgs(argv) {
   const options = {
     project: "",
+    repoPath: "",
+    postIndex: false,
     limit: 6,
     category: "all",
     minScore: 50,
@@ -25,6 +31,10 @@ function parseArgs(argv) {
       options.help = true;
     } else if (arg === "--project" && i + 1 < argv.length) {
       options.project = argv[++i];
+    } else if (arg === "--repo-path" && i + 1 < argv.length) {
+      options.repoPath = argv[++i];
+    } else if (arg === "--post-index") {
+      options.postIndex = true;
     } else if (arg === "--limit" && i + 1 < argv.length) {
       options.limit = parseInt(argv[++i], 10);
     } else if (arg === "--category" && i + 1 < argv.length) {
@@ -49,11 +59,13 @@ Usage: node scripts/recommend-diagrams.mjs [options]
 
 Options:
   --project <name>         Target project name (defaults to repository folder name)
+  --repo-path <path>       Target repository path (defaults to current working directory)
+  --post-index             Run post-indexing hook: ensures diagrams/ dir, generates System Overview
   --limit <num>            Maximum number of recommendations to return (default: 6)
   --category <cat>         Filter by category: 'all', 'structural', 'behavioral', 'quality', 'dataflow'
   --min-score <score>      Minimum utility score threshold (0-100, default: 50)
   --format <format>        Output format: 'markdown', 'json', or 'summary' (default: 'markdown')
-  --generate               Generate Mermaid files into .codebase-memory/diagrams/<project>/
+  --generate               Generate Mermaid, Spec, and Stylized HTML files into repo diagrams/
   --out <file>             Write output to specified file
   --help, -h               Show this help message
 `);
@@ -67,11 +79,23 @@ export async function main() {
     process.exit(0);
   }
 
+  const repoPath = options.repoPath ? path.resolve(options.repoPath) : process.cwd();
+
   // Derive project name if not specified
   let project = options.project;
   if (!project) {
-    const cwd = process.cwd();
-    project = path.basename(cwd);
+    project = path.basename(repoPath);
+  }
+
+  // Handle post-indexing lifecycle hook
+  if (options.postIndex) {
+    const { diagramsDir, systemOverview } = runPostIndexSystemOverview(repoPath, project);
+    console.error(`[recommend-diagrams] Post-index hook executed: verified diagrams dir at ${diagramsDir}`);
+    console.error(`[recommend-diagrams] Generated primary System Overview: ${systemOverview.title}`);
+    if (!options.generate && options.format !== "json") {
+      console.log(`Post-index completed. System Overview generated in ${diagramsDir}`);
+      return;
+    }
   }
 
   const result = recommendDiagramsForProject(project, {
@@ -80,25 +104,14 @@ export async function main() {
     minScore: options.minScore
   });
 
-  // If --generate is requested, write .mermaid, specs/*.json, and stylized .html files
+  // If --generate is requested, write .mermaid, specs/*.json, and stylized .html files into <repo_root>/diagrams/
   if (options.generate && result.recommendations.length > 0) {
-    const targetDir = path.join(process.cwd(), ".codebase-memory", "diagrams", project);
-    const specsDir = path.join(targetDir, "specs");
-    fs.mkdirSync(targetDir, { recursive: true });
-    fs.mkdirSync(specsDir, { recursive: true });
+    const { diagramsDir } = ensureRepoDiagramsDir(repoPath);
 
     for (const r of result.recommendations) {
-      if (r.mermaid) {
-        fs.writeFileSync(path.join(targetDir, `${r.id}.mermaid`), r.mermaid, "utf8");
-      }
-      if (r.spec) {
-        fs.writeFileSync(path.join(specsDir, `${r.id}.json`), JSON.stringify(r.spec, null, 2), "utf8");
-      }
-      if (r.stylizedHtml) {
-        fs.writeFileSync(path.join(targetDir, `${r.id}.html`), r.stylizedHtml, "utf8");
-      }
+      writeRepoDiagramSuite(repoPath, r, false);
     }
-    console.error(`[recommend-diagrams] Generated ${result.recommendations.length} complete diagram suites (.mermaid, .json spec, and stylized .html) in ${targetDir}`);
+    console.error(`[recommend-diagrams] Generated ${result.recommendations.length} complete diagram suites (.mermaid, .json spec, and stylized .html) in ${diagramsDir}`);
   }
 
   let outputText = "";

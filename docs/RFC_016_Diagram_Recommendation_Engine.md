@@ -50,6 +50,8 @@ The data required to automatically calculate which diagrams will yield the highe
 - **G-3: Outside Core C Architecture:** Implemented in TypeScript/JavaScript without modifying the Core C binary, in strict accordance with the Core C Preference Rule.
 - **G-4: Seamless Integration:** Accessible via MCP tool interface, command-line runner (`scripts/recommend-diagrams.mjs`), and the visual `DiagramsTab` in `graph-ui`.
 - **G-5: Sub-Second Recommendation Execution:** Computing recommendations across repositories with >25,000 nodes must complete in under **800 milliseconds** via indexed SQLite queries.
+- **G-6: Automatic Post-Index System Overview & Repo `diagrams/` Directory:** Immediately after a repository finishes indexing, an automated lifecycle hook executes the System Overview generator. The repository root is checked for a `diagrams/` directory; if it does not exist, it is automatically created. All generated diagram assets (`.mermaid`, `specs/<id>.json`, `.html`, and `catalog.json`) are stored within `<repo_root>/diagrams/`.
+- **G-7: Persistent Repository Diagram Catalog in Overview:** The Diagrams Tab Overview screen displays the primary System Overview diagram and all previously generated diagrams discovered in the repository's `diagrams/` directory, persisting architectural visualizations across sessions.
 
 ### 2.2 Non-Goals
 - **NG-1: Replacing `export_diagram`:** This tool does not replace the diagram renderer; it is an intelligent selector and orchestrator that determines *what* to render and with *which parameters*.
@@ -317,23 +319,80 @@ When a diagram is generated (via CLI `--generate` or UI), the engine synthesizes
 2. `specs/<id>.json`: Fully typed, Archify-compatible JSON-IR specification with node positions, metadata, source evidence citations, and card insights.
 3. `<id>.html`: Self-contained, rich interactive Stylized View artifact with dark theme (`#090d16`), vector SVG canvas, animated signal flow pulses, pan/zoom controls, interactive node inspector, and bottom insight cards.
 
+### 4.4 Post-Indexing Lifecycle Hook & Repository `diagrams/` Directory Convention
+To establish an automated, continuous visualization lifecycle, RFC 016 introduces a mandatory post-indexing execution hook:
+
+```
+┌─────────────────────────────────┐
+│  Repo Indexing Complete         │ (index_repository / CLI / Daemon)
+└────────────────┬────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│ Check `<repo_root>/diagrams/`    │ ───► Does not exist? ──► Create `diagrams/` & `diagrams/specs/`
+└────────────────┬────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│ Run System Overview Analysis    │ (Synthesizes architecture.mermaid, specs/architecture.json, architecture.html)
+└────────────────┬────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│ Write Assets & Update Manifest  │
+│ `<repo_root>/diagrams/`         │
+│  ├── architecture.mermaid       │
+│  ├── architecture.html          │
+│  ├── specs/architecture.json    │
+│  └── catalog.json               │ (Tracks all generated diagrams & source citations)
+└─────────────────────────────────┘
+```
+
+#### Detailed Lifecycle Rules:
+1. **Automated Trigger**:
+   - Immediately after any repository completes initial indexing or full re-indexing, the system executes the **System Overview** analysis pass.
+2. **Directory Inspection & Creation**:
+   - The system checks whether `<repo_root>/diagrams/` exists.
+   - If missing, it automatically creates `<repo_root>/diagrams/` and `<repo_root>/diagrams/specs/`.
+3. **Artifact Placement**:
+   - **All files needed for the diagrams must be placed into this directory**:
+     - Raw Mermaid AST files: `<repo_root>/diagrams/<id>.mermaid`
+     - Archify JSON specification files: `<repo_root>/diagrams/specs/<id>.json`
+     - Interactive stylized view files: `<repo_root>/diagrams/<id>.html`
+     - Repository diagram catalog: `<repo_root>/diagrams/catalog.json`
+4. **Catalog Indexing**:
+   - `catalog.json` records every generated diagram with its `id`, `title`, `category`, `utility_score`, `generated_at` timestamp, and `sources` citations.
+   - Any subsequently generated diagram (via the UI Recommendations tab, MCP tool call, or CLI runner) is appended to `catalog.json` and saved to `diagrams/`.
+
 ---
 
 ## 5. UI Integration in `graph-ui` (`DiagramsTab.tsx`)
 
-In [graph-ui/src/components/DiagramsTab.tsx](file:///c:/AI/Source/codebase-memory-mcp-ui/graph-ui/src/components/DiagramsTab.tsx), recommended diagrams are first-class peers to the verified diagrams suite, sharing the **identical visual presentation and interactive viewer experience**:
+In [graph-ui/src/components/DiagramsTab.tsx](file:///c:/AI/Source/codebase-memory-mcp-ui/graph-ui/src/components/DiagramsTab.tsx), recommended diagrams and the repository's diagram directory are fully synchronized:
 
-### 5.1 Gallery & Overview Mode
-- **Sub-Tab Navigation**: Seamless switching between "Verified Architecture Suite (6)" and "Recommended for this Project (RFC 016)".
-- **Identical Card Structure**:
-  - Category Badge + Priority / Utility Score Flame Chip.
-  - Title, Subtitle, and Description.
-  - Source Citations Box: Exact repository file paths and line numbers (`path:line`) with architectural labels.
-  - Key Metrics Chips (Fan-out, Callee files, Coupling strength, Co-changes, Clone lines).
-  - Launch Action: "Launch Interactive Viewer" with hover transition.
+### 5.1 Overview Screen: System Overview & Previously Generated Diagrams
+The Diagrams Tab Overview screen serves as the primary visual hub for the active project:
+- **Primary Hero: System Overview**:
+  - Prominently showcases the foundational System Overview architecture diagram generated during the post-indexing pass.
+  - Highlights its verified invariants, sub-millisecond SLA, and AST call citations.
+  - Direct "Launch Interactive Viewer" button mounts the stylized obsidian canvas.
+- **Previously Generated Diagrams Catalog**:
+  - Automatically loads and displays **all previously generated diagrams** discovered in the repository's `diagrams/` directory (via `catalog.json` / static assets).
+  - Each diagram card displays:
+    - Category badge, title, subtitle, and description.
+    - Codebase Source Citations box (`path:line`).
+    - Format badges (`.mermaid`, `spec.json`, `.html`).
+    - Direct "Launch Interactive Viewer" button.
+- **Seamless Discovery**:
+  - An inline banner guides developers to the "Recommended for this Project (RFC 016)" subtab whenever new architectural candidates or fragility hotspots are discovered.
 
-### 5.2 Multi-Mode Interactive Viewer
-Clicking any diagram card (verified or recommended) launches the identical viewer stage:
+### 5.2 Recommendation Discovery Subtab
+- Displays prioritized candidate cards discovered from SQLite graph heuristics.
+- Filter by category: Behavioral (Sequence), Quality & Fragility, Structural (Architecture), and Data Flow.
+- 1-click generation automatically writes the triple-artifact suite into the repository's `diagrams/` directory and updates `catalog.json`.
+
+### 5.3 Multi-Mode Interactive Viewer
+Clicking any diagram card (System Overview, previously generated diagram, or recommendation) launches the identical viewer stage:
 1. **Viewer Subheader Bar**:
    - Category badge, title, subtitle / description, Gate Pass / Utility Score, and duration SLA in milliseconds.
 2. **Dual-Surface View Switcher**:
