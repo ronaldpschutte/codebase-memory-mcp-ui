@@ -1,30 +1,20 @@
 {
   "schema_version": 1,
-  "diagram_type": "architecture",
+  "diagram_type": "dataflow",
   "meta": {
-    "title": "System Overview: Architecture & Subsystems",
-    "subtitle": "High-level topology & subsystem dependency hierarchy",
-    "output": "diagrams/architecture.html",
+    "title": "Ingress to Storage Data Flow Pipeline",
+    "subtitle": "Follows request payloads through AST validation and relational insertion.",
+    "output": "diagrams/rec-dataflow-lifecycle.html",
     "animation": "trace",
     "quality_profile": "showcase",
-    "utility_score": 100,
-    "priority": "critical"
+    "utility_score": 84,
+    "priority": "high"
   },
   "evidence": [
     {
       "path": "src/main.c",
       "line": 1,
-      "label": "entry point"
-    },
-    {
-      "path": "src/mcp/mcp.c",
-      "line": 1,
-      "label": "protocol dispatch"
-    },
-    {
-      "path": "src/store/store.c",
-      "line": 1,
-      "label": "relational store"
+      "label": "Ingress to Storage Data Flow Pipeline"
     }
   ],
   "participants": [
@@ -37,7 +27,7 @@
     {
       "id": "core",
       "type": "backend",
-      "label": "Architecture & Subsystems",
+      "label": "Ingress to Storage Data Flow Pipeline",
       "sublabel": "src/main.c"
     },
     {
@@ -47,7 +37,9 @@
       "sublabel": "Relational Schema Tables"
     }
   ],
-  "metrics": {},
+  "metrics": {
+    "stages": 4
+  },
   "cards": [
     {
       "dot": "emerald",
@@ -61,8 +53,8 @@
       "dot": "cyan",
       "title": "Deterministic AST Evidence",
       "items": [
-        "Scored at 100/100 Utility Score based on topological density",
-        "Validated against 3 source files and AST call definitions"
+        "Scored at 84/100 Utility Score based on topological density",
+        "Validated against 1 source files and AST call definitions"
       ]
     },
     {
@@ -74,5 +66,5 @@
       ]
     }
   ],
-  "mermaid_definition": "graph TD\n    Client[\"Client Interface (CLI / UI / Agents)\"] --> Protocol[\"MCP & IPC Protocol Daemon\"]\n    Protocol --> Pipeline[\"Multi-Pass AST Worker Pool\"]\n    Pipeline --> Store[(\"SQLite WAL Store\")]"
+  "mermaid_definition": "flowchart LR\n  Ingress[Request] --> Worker[Worker Pool] --> SQLite[(Database)]"
 }

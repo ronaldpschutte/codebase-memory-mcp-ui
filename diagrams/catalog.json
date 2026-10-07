@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "repo_path": "C:\\AI\\Source\\codebase-memory-mcp-ui\\.worktrees\\RFC_016",
-  "updated_at": "2026-10-07T11:58:08.836Z",
+  "updated_at": "2026-10-07T13:07:08.062Z",
   "system_overview": {
     "id": "architecture",
     "title": "System Overview: Architecture & Subsystems",
@@ -33,7 +33,7 @@
     "mermaidFile": "architecture.mermaid",
     "durationMs": 8,
     "utility_score": 100,
-    "generated_at": "2026-10-07T11:57:57.120Z",
+    "generated_at": "2026-10-07T13:07:04.044Z",
     "is_system_overview": true
   },
   "generated_diagrams": [
@@ -68,7 +68,7 @@
       "mermaidFile": "architecture.mermaid",
       "durationMs": 8,
       "utility_score": 100,
-      "generated_at": "2026-10-07T11:57:57.120Z",
+      "generated_at": "2026-10-07T13:07:04.044Z",
       "is_system_overview": true
     },
     {
@@ -90,9 +90,9 @@
       "htmlFile": "rec-arch-overview.html",
       "specFile": "specs/rec-arch-overview.json",
       "mermaidFile": "rec-arch-overview.mermaid",
-      "durationMs": 5,
+      "durationMs": 6,
       "utility_score": 95,
-      "generated_at": "2026-10-07T11:58:08.829Z",
+      "generated_at": "2026-10-07T13:07:08.053Z",
       "is_system_overview": false
     },
     {
@@ -114,9 +114,9 @@
       "htmlFile": "rec-fragility-co-change.html",
       "specFile": "specs/rec-fragility-co-change.json",
       "mermaidFile": "rec-fragility-co-change.mermaid",
-      "durationMs": 8,
+      "durationMs": 6,
       "utility_score": 88,
-      "generated_at": "2026-10-07T11:58:08.833Z",
+      "generated_at": "2026-10-07T13:07:08.058Z",
       "is_system_overview": false
     },
     {
@@ -138,9 +138,9 @@
       "htmlFile": "rec-dataflow-lifecycle.html",
       "specFile": "specs/rec-dataflow-lifecycle.json",
       "mermaidFile": "rec-dataflow-lifecycle.mermaid",
-      "durationMs": 7,
+      "durationMs": 5,
       "utility_score": 84,
-      "generated_at": "2026-10-07T11:58:08.836Z",
+      "generated_at": "2026-10-07T13:07:08.062Z",
       "is_system_overview": false
     }
   ]

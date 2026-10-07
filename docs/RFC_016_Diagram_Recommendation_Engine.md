@@ -396,7 +396,13 @@ Clicking any diagram card (System Overview, previously generated diagram, or rec
 1. **Viewer Subheader Bar**:
    - Category badge, title, subtitle / description, Gate Pass / Utility Score, and duration SLA in milliseconds.
 2. **Dual-Surface View Switcher**:
-   - **Stylized Canvas**: Interactive stylized SVG canvas matching the original Archify aesthetic with responsive pan/zoom, interactive node click inspector, glowing accents, animated signal flows, and bottom metric cards.
+   - **Stylized Canvas**: Interactive stylized SVG canvas matching the obsidian dark-mode aesthetic (`#090d16`) with responsive pan/zoom, interactive node click inspector, glowing accents, animated signal flows (`.flow-line`), and bottom metric cards. Each diagram category features a domain-specific vector layout:
+     - **Data Flow (`dataflow`)**: Multi-phase horizontal pipeline (Client Request $\to$ Ingress Dispatcher $\to$ Worker Pool & Hybrid LSP $\to$ SQLite WAL Store) with glowing data badges (`Payload`, `AST Parse`, `Symbols`, `Nodes WAL`, `Edges WAL`).
+     - **Test Coverage (`test_coverage`)**: 3-column verification matrix (Untested Complexity Blindspots with amber hazard badges and dashed gap arrows $\to$ Active Test Runner Suite with assertion counts $\to$ Covered Production Targets with green `VERIFIED PASS` badges).
+     - **Error Flow (`error_flow`)**: Central execution spine with decision diamonds (`WAL Lock Valid?`, `Alloc Within Budget?`) and red hazard exit nodes (`ERR_STORE_LOCKED`, `ERR_OOM_GUARD`).
+     - **Temporal Fragility (`fragility_network`)**: High-risk co-change cluster network with Git commit coupling percentages and bidirectional co-edit links.
+     - **Sequence (`sequence`)**: Vertical lifeline diagram with activated participant lifelines, timestamped request vectors, and return flows.
+     - **Architecture (`architecture`)**: Hierarchical layered topology (Clients, Ingress Daemon, Worker Pool, Storage Engine).
    - **Mermaid AST**: Clean, dark-mode Mermaid AST view via iframe preview.
 3. **Spec Drawer**:
    - Collapsible slide-out drawer on the right rendering the exact Archify JSON specification with source citations and evidence.

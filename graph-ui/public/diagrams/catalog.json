@@ -1,120 +1,147 @@
 {
   "schema_version": 1,
-  "project": "codebase-memory-mcp-ui",
-  "updated_at": "2026-10-07T12:00:00.000Z",
+  "repo_path": "C:\\AI\\Source\\codebase-memory-mcp-ui\\.worktrees\\RFC_016",
+  "updated_at": "2026-10-07T13:07:08.062Z",
   "system_overview": {
     "id": "architecture",
-    "title": "System Architecture",
-    "category": "Architecture",
+    "title": "System Overview: Architecture & Subsystems",
+    "category": "structural",
     "type": "architecture",
-    "subtitle": "High-level topology & MCP daemon IPC",
-    "description": "Client surfaces (Cursor, Claude Code), stdio MCP protocol frontend, authenticated daemon IPC, Tree-Sitter AST worker pool, Hybrid LSP, native export_diagram synthesis engine, and in-memory SQLite WAL graph store.",
+    "subtitle": "High-level topology & subsystem dependency hierarchy",
+    "description": "Foundational architecture overview compiled post-indexing. Visualizes client interfaces, protocol layers, AST workers, and storage layers.",
     "badgeClass": "bg-indigo-500/15 text-indigo-400 border-indigo-500/30",
     "hoverBorderClass": "hover:border-indigo-500/50 hover:shadow-indigo-500/10",
     "sources": [
-      { "path": "src/main.c", "line": 2748, "label": "main entry point" },
-      { "path": "src/mcp/mcp.c", "line": 8184, "label": "export_diagram dispatch" },
-      { "path": "src/diagram/diagram.c", "line": 243, "label": "cbm_diagram_generate" },
-      { "path": "src/store/store.c", "line": 2, "label": "SQLite WAL store" }
+      {
+        "path": "src/main.c",
+        "line": 1,
+        "label": "entry point"
+      },
+      {
+        "path": "src/mcp/mcp.c",
+        "line": 1,
+        "label": "protocol dispatch"
+      },
+      {
+        "path": "src/store/store.c",
+        "line": 1,
+        "label": "relational store"
+      }
     ],
     "htmlFile": "architecture.html",
     "specFile": "specs/architecture.json",
-    "durationMs": 5929,
+    "mermaidFile": "architecture.mermaid",
+    "durationMs": 8,
     "utility_score": 100,
+    "generated_at": "2026-10-07T13:07:04.044Z",
     "is_system_overview": true
   },
   "generated_diagrams": [
     {
-      "id": "workflow",
-      "title": "Multi-Pass Indexing Pipeline",
-      "category": "Pipeline",
-      "type": "pipeline",
-      "subtitle": "AST extraction, resolution & SQLite persistence",
-      "description": "End-to-end repository indexing pipeline: change detection watcher, tree-sitter AST extraction, cross-file symbol resolution, and SQLite WAL batch writes.",
-      "badgeClass": "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-      "hoverBorderClass": "hover:border-emerald-500/50 hover:shadow-emerald-500/10",
-      "sources": [
-        { "path": "src/pipeline/pipeline.c", "line": 1, "label": "pipeline coordinator" },
-        { "path": "src/pipeline/pass_definitions.c", "line": 1, "label": "tree-sitter extraction" },
-        { "path": "src/pipeline/pass_lsp_cross.c", "line": 1, "label": "cross-file resolution" },
-        { "path": "src/store/store.c", "line": 120, "label": "batch node/edge insert" }
-      ],
-      "htmlFile": "workflow-indexing-pipeline.html",
-      "specFile": "specs/workflow-indexing-pipeline.json",
-      "durationMs": 6241
-    },
-    {
-      "id": "sequence",
-      "title": "Tools/Call Request Handling Sequence",
-      "category": "Sequence",
-      "type": "sequence",
-      "subtitle": "End-to-end dispatch of MCP tool invocations",
-      "description": "JSON-RPC tools/call processing flow: argument extraction, schema validation, transaction boundary creation, Cypher/graph query execution, and response synthesis.",
-      "badgeClass": "bg-sky-500/15 text-sky-400 border-sky-500/30",
-      "hoverBorderClass": "hover:border-sky-500/50 hover:shadow-sky-500/10",
-      "sources": [
-        { "path": "src/mcp/mcp.c", "line": 17893, "label": "handle_tools_call" },
-        { "path": "src/cypher/cypher.c", "line": 1, "label": "cypher execution engine" },
-        { "path": "src/store/store.c", "line": 40, "label": "read transaction" }
-      ],
-      "htmlFile": "sequence-tool-call.html",
-      "specFile": "specs/sequence-tool-call.json",
-      "durationMs": 3120
-    },
-    {
-      "id": "dataflow",
-      "title": "Ingress to Storage Data Flow",
-      "category": "Data Flow",
-      "type": "dataflow",
-      "subtitle": "Token, AST, and edge data pipeline transformations",
-      "description": "Detailed data transformation pipeline tracing source text buffers through tree-sitter syntax nodes, symbol normalization, and compressed SQLite pages.",
-      "badgeClass": "bg-cyan-500/15 text-cyan-400 border-cyan-500/30",
-      "hoverBorderClass": "hover:border-cyan-500/50 hover:shadow-cyan-500/10",
-      "sources": [
-        { "path": "src/pipeline/pipeline_read.c", "line": 1, "label": "file reader" },
-        { "path": "src/foundation/compress.c", "line": 1, "label": "LZ4 compression" },
-        { "path": "src/store/store.c", "line": 200, "label": "WAL page flush" }
-      ],
-      "htmlFile": "dataflow-code-to-graph.html",
-      "specFile": "specs/dataflow-code-to-graph.json",
-      "durationMs": 4510
-    },
-    {
-      "id": "lifecycle",
-      "title": "Component & Hook Tree",
-      "category": "Architecture",
+      "id": "architecture",
+      "title": "System Overview: Architecture & Subsystems",
+      "category": "structural",
       "type": "architecture",
-      "subtitle": "React 19 component hierarchy & custom hook wiring",
-      "description": "High-level UI component tree and state flow: App.tsx root, Tab routing, 3D GraphCanvas with Three.js, ControlTab, and DiagramsTab integration.",
-      "badgeClass": "bg-purple-500/15 text-purple-400 border-purple-500/30",
-      "hoverBorderClass": "hover:border-purple-500/50 hover:shadow-purple-500/10",
+      "subtitle": "High-level topology & subsystem dependency hierarchy",
+      "description": "Foundational architecture overview compiled post-indexing. Visualizes client interfaces, protocol layers, AST workers, and storage layers.",
+      "badgeClass": "bg-indigo-500/15 text-indigo-400 border-indigo-500/30",
+      "hoverBorderClass": "hover:border-indigo-500/50 hover:shadow-indigo-500/10",
       "sources": [
-        { "path": "src/watcher/watcher.c", "line": 2, "label": "git change watcher" },
-        { "path": "src/daemon/bootstrap.c", "line: 1, "label": "daemon startup" },
-        { "path": "src/pipeline/pipeline_delta.c", "label": "delta update worker" }
+        {
+          "path": "src/main.c",
+          "line": 1,
+          "label": "entry point"
+        },
+        {
+          "path": "src/mcp/mcp.c",
+          "line": 1,
+          "label": "protocol dispatch"
+        },
+        {
+          "path": "src/store/store.c",
+          "line": 1,
+          "label": "relational store"
+        }
       ],
-      "htmlFile": "lifecycle-indexing-state.html",
-      "specFile": "specs/lifecycle.json",
-      "durationMs": 7105
+      "htmlFile": "architecture.html",
+      "specFile": "specs/architecture.json",
+      "mermaidFile": "architecture.mermaid",
+      "durationMs": 8,
+      "utility_score": 100,
+      "generated_at": "2026-10-07T13:07:04.044Z",
+      "is_system_overview": true
     },
     {
-      "id": "sequence_export",
-      "title": "Export Diagram Sequence",
-      "category": "Sequence",
-      "type": "sequence",
-      "subtitle": "export_diagram execution flow & synthesis",
-      "description": "Step-by-step trace of an AI Agent invoking export_diagram(type=\"sequence\", format=\"mermaid\"), validating SQLite WAL store readiness, calling cbm_diagram_generate, traversing call graph edges, and synthesizing Mermaid/SVG vector output.",
+      "id": "rec-arch-overview",
+      "title": "System Architecture & Component Overview",
+      "category": "structural",
+      "type": "architecture",
+      "subtitle": "High-level map of client protocols, central dispatcher, and persistence store.",
+      "description": "High-level map of client protocols, central dispatcher, and persistence store.",
+      "badgeClass": "bg-rose-500/15 text-rose-400 border-rose-500/30",
+      "hoverBorderClass": "hover:border-rose-500/50 hover:shadow-rose-500/10",
+      "sources": [
+        {
+          "path": "src/main.c",
+          "line": 1,
+          "label": "System Architecture & Component Overview"
+        }
+      ],
+      "htmlFile": "rec-arch-overview.html",
+      "specFile": "specs/rec-arch-overview.json",
+      "mermaidFile": "rec-arch-overview.mermaid",
+      "durationMs": 6,
+      "utility_score": 95,
+      "generated_at": "2026-10-07T13:07:08.053Z",
+      "is_system_overview": false
+    },
+    {
+      "id": "rec-fragility-co-change",
+      "title": "Temporal Co-Change Fragility Network",
+      "category": "quality",
+      "type": "fragility_network",
+      "subtitle": "Identifies hidden file dependencies from Git commit co-occurrence history.",
+      "description": "Identifies hidden file dependencies from Git commit co-occurrence history.",
       "badgeClass": "bg-amber-500/15 text-amber-400 border-amber-500/30",
       "hoverBorderClass": "hover:border-amber-500/50 hover:shadow-amber-500/10",
       "sources": [
-        { "path": "src/mcp/mcp.c", "line": 8184, "label": "handle_export_diagram" },
-        { "path": "src/diagram/diagram.c", "line": 243, "label": "cbm_diagram_generate" },
-        { "path": "src/diagram/query_sequence.c", "label": "sequence planner" },
-        { "path": "src/diagram/emit_mermaid.c", "label": "Mermaid emitter" }
+        {
+          "path": "src/main.c",
+          "line": 1,
+          "label": "Temporal Co-Change Fragility Network"
+        }
       ],
-      "htmlFile": "sequence-export-diagram.html",
-      "specFile": "specs/sequence-export-diagram.json",
-      "durationMs": 4890
+      "htmlFile": "rec-fragility-co-change.html",
+      "specFile": "specs/rec-fragility-co-change.json",
+      "mermaidFile": "rec-fragility-co-change.mermaid",
+      "durationMs": 6,
+      "utility_score": 88,
+      "generated_at": "2026-10-07T13:07:08.058Z",
+      "is_system_overview": false
+    },
+    {
+      "id": "rec-dataflow-lifecycle",
+      "title": "Ingress to Storage Data Flow Pipeline",
+      "category": "dataflow",
+      "type": "dataflow",
+      "subtitle": "Follows request payloads through AST validation and relational insertion.",
+      "description": "Follows request payloads through AST validation and relational insertion.",
+      "badgeClass": "bg-amber-500/15 text-amber-400 border-amber-500/30",
+      "hoverBorderClass": "hover:border-amber-500/50 hover:shadow-amber-500/10",
+      "sources": [
+        {
+          "path": "src/main.c",
+          "line": 1,
+          "label": "Ingress to Storage Data Flow Pipeline"
+        }
+      ],
+      "htmlFile": "rec-dataflow-lifecycle.html",
+      "specFile": "specs/rec-dataflow-lifecycle.json",
+      "mermaidFile": "rec-dataflow-lifecycle.mermaid",
+      "durationMs": 5,
+      "utility_score": 84,
+      "generated_at": "2026-10-07T13:07:08.062Z",
+      "is_system_overview": false
     }
   ]
 }

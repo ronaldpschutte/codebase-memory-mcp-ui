@@ -2,29 +2,19 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "System Overview: Architecture & Subsystems",
-    "subtitle": "High-level topology & subsystem dependency hierarchy",
-    "output": "diagrams/architecture.html",
+    "title": "System Architecture & Component Overview",
+    "subtitle": "High-level map of client protocols, central dispatcher, and persistence store.",
+    "output": "diagrams/rec-arch-overview.html",
     "animation": "trace",
     "quality_profile": "showcase",
-    "utility_score": 100,
+    "utility_score": 95,
     "priority": "critical"
   },
   "evidence": [
     {
       "path": "src/main.c",
       "line": 1,
-      "label": "entry point"
-    },
-    {
-      "path": "src/mcp/mcp.c",
-      "line": 1,
-      "label": "protocol dispatch"
-    },
-    {
-      "path": "src/store/store.c",
-      "line": 1,
-      "label": "relational store"
+      "label": "System Architecture & Component Overview"
     }
   ],
   "participants": [
@@ -37,7 +27,7 @@
     {
       "id": "core",
       "type": "backend",
-      "label": "Architecture & Subsystems",
+      "label": "System Architecture & Component Overview",
       "sublabel": "src/main.c"
     },
     {
@@ -47,7 +37,10 @@
       "sublabel": "Relational Schema Tables"
     }
   ],
-  "metrics": {},
+  "metrics": {
+    "entry_points": 3,
+    "subsystems": 5
+  },
   "cards": [
     {
       "dot": "emerald",
@@ -61,8 +54,8 @@
       "dot": "cyan",
       "title": "Deterministic AST Evidence",
       "items": [
-        "Scored at 100/100 Utility Score based on topological density",
-        "Validated against 3 source files and AST call definitions"
+        "Scored at 95/100 Utility Score based on topological density",
+        "Validated against 1 source files and AST call definitions"
       ]
     },
     {
@@ -74,5 +67,5 @@
       ]
     }
   ],
-  "mermaid_definition": "graph TD\n    Client[\"Client Interface (CLI / UI / Agents)\"] --> Protocol[\"MCP & IPC Protocol Daemon\"]\n    Protocol --> Pipeline[\"Multi-Pass AST Worker Pool\"]\n    Pipeline --> Store[(\"SQLite WAL Store\")]"
+  "mermaid_definition": "graph TD\n  Client[MCP Client] --> Daemon[Daemon Dispatcher]\n  Daemon --> Store[(SQLite WAL Store)]"
 }

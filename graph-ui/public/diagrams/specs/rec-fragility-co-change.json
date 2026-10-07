@@ -2,29 +2,19 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "System Overview: Architecture & Subsystems",
-    "subtitle": "High-level topology & subsystem dependency hierarchy",
-    "output": "diagrams/architecture.html",
+    "title": "Temporal Co-Change Fragility Network",
+    "subtitle": "Identifies hidden file dependencies from Git commit co-occurrence history.",
+    "output": "diagrams/rec-fragility-co-change.html",
     "animation": "trace",
     "quality_profile": "showcase",
-    "utility_score": 100,
-    "priority": "critical"
+    "utility_score": 88,
+    "priority": "high"
   },
   "evidence": [
     {
       "path": "src/main.c",
       "line": 1,
-      "label": "entry point"
-    },
-    {
-      "path": "src/mcp/mcp.c",
-      "line": 1,
-      "label": "protocol dispatch"
-    },
-    {
-      "path": "src/store/store.c",
-      "line": 1,
-      "label": "relational store"
+      "label": "Temporal Co-Change Fragility Network"
     }
   ],
   "participants": [
@@ -37,7 +27,7 @@
     {
       "id": "core",
       "type": "backend",
-      "label": "Architecture & Subsystems",
+      "label": "Temporal Co-Change Fragility Network",
       "sublabel": "src/main.c"
     },
     {
@@ -47,7 +37,9 @@
       "sublabel": "Relational Schema Tables"
     }
   ],
-  "metrics": {},
+  "metrics": {
+    "coupled_pairs": 4
+  },
   "cards": [
     {
       "dot": "emerald",
@@ -61,8 +53,8 @@
       "dot": "cyan",
       "title": "Deterministic AST Evidence",
       "items": [
-        "Scored at 100/100 Utility Score based on topological density",
-        "Validated against 3 source files and AST call definitions"
+        "Scored at 88/100 Utility Score based on topological density",
+        "Validated against 1 source files and AST call definitions"
       ]
     },
     {
@@ -74,5 +66,5 @@
       ]
     }
   ],
-  "mermaid_definition": "graph TD\n    Client[\"Client Interface (CLI / UI / Agents)\"] --> Protocol[\"MCP & IPC Protocol Daemon\"]\n    Protocol --> Pipeline[\"Multi-Pass AST Worker Pool\"]\n    Pipeline --> Store[(\"SQLite WAL Store\")]"
+  "mermaid_definition": "graph LR\n  ModA[Module A] <==>|Coupled (15 commits)| ModB[Module B]"
 }
