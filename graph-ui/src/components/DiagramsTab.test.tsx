@@ -83,4 +83,42 @@ describe("DiagramsTab", () => {
       expect(openMock).toHaveBeenCalled();
     });
   });
+
+  it("switches to Recommended Diagrams sub-tab and renders recommendations grid", async () => {
+    render(<DiagramsTab selectedProject="my-test-project" />);
+
+    const recsBtn = screen.getByRole("button", { name: /Recommended for this Project/i });
+    expect(recsBtn).toBeInTheDocument();
+
+    fireEvent.click(recsBtn);
+
+    expect(await screen.findByTestId("recommendations-grid")).toBeInTheDocument();
+    expect(screen.getByText(/Recommended Diagrams for/i)).toBeInTheDocument();
+  });
+
+  it("filters recommendations by category and opens preview modal", async () => {
+    render(<DiagramsTab selectedProject="my-test-project" />);
+
+    // Switch to recommendations
+    fireEvent.click(screen.getByRole("button", { name: /Recommended for this Project/i }));
+
+    expect(await screen.findByTestId("recommendations-grid")).toBeInTheDocument();
+
+    // Click filter for Behavioral
+    const behavioralFilterBtn = screen.getByRole("button", { name: /Behavioral/i });
+    fireEvent.click(behavioralFilterBtn);
+
+    // Click Preview & Generate on the first visible card
+    const previewButtons = await screen.findAllByRole("button", { name: /Preview & Generate/i });
+    expect(previewButtons.length).toBeGreaterThan(0);
+    fireEvent.click(previewButtons[0]);
+
+    // Expect preview modal to appear
+    expect(await screen.findByTestId("diagram-preview-modal")).toBeInTheDocument();
+    expect(screen.getByText(/Generated Mermaid Specification/i)).toBeInTheDocument();
+
+    // Close modal
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByTestId("diagram-preview-modal")).not.toBeInTheDocument();
+  });
 });

@@ -12,6 +12,7 @@ import {
   ArrowRight,
   BookOpen,
 } from "lucide-react";
+import { DiagramRecommendations } from "./DiagramRecommendations";
 
 export interface DiagramItem {
   id: string;
@@ -394,10 +395,12 @@ function generateMermaidHtml(title: string, mermaidCode: string): string {
 interface DiagramsTabProps {
   initialDiagram?: string | null;
   onSelectDiagram?: (diagramId: string | null) => void;
+  selectedProject?: string | null;
 }
 
-export function DiagramsTab({ initialDiagram, onSelectDiagram }: DiagramsTabProps) {
+export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }: DiagramsTabProps) {
   const [selectedId, setSelectedId] = useState<string | null>(initialDiagram || null);
+  const [gallerySubTab, setGallerySubTab] = useState<"verified" | "recommended">("verified");
   const [viewMode, setViewMode] = useState<"stylized" | "mermaid">("stylized");
   const [diagramHtml, setDiagramHtml] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -494,15 +497,33 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram }: DiagramsTabProp
       <div className="flex items-center justify-between px-6 py-2.5 border-b border-border/30 bg-[#0b131e]/90 backdrop-blur-md shrink-0">
         <div className="flex items-center gap-2 overflow-x-auto py-1">
           <button
-            onClick={() => selectDiagram(null)}
+            onClick={() => {
+              selectDiagram(null);
+              setGallerySubTab("verified");
+            }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all ${
-              selectedId === null
+              selectedId === null && gallerySubTab === "verified"
                 ? "bg-primary/20 text-primary border border-primary/30 shadow-sm shadow-primary/10"
                 : "text-muted-foreground hover:text-foreground hover:bg-white/[0.04] border border-transparent"
             }`}
           >
             <Grid className="w-3.5 h-3.5" />
             <span>Overview</span>
+          </button>
+
+          <button
+            onClick={() => {
+              selectDiagram(null);
+              setGallerySubTab("recommended");
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all ${
+              selectedId === null && gallerySubTab === "recommended"
+                ? "bg-primary/20 text-primary border border-primary/30 shadow-sm shadow-primary/10"
+                : "text-muted-foreground hover:text-foreground hover:bg-white/[0.04] border border-transparent"
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-primary" />
+            <span>Recommendations</span>
           </button>
 
           <div className="h-4 w-px bg-border/40 mx-1" />
@@ -600,8 +621,41 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram }: DiagramsTabProp
         {!activeDiagram ? (
           /* Gallery Mode */
           <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-8 max-w-7xl mx-auto w-full">
-            {/* Hero / Header banner */}
-            <div className="relative rounded-2xl border border-border/40 bg-gradient-to-br from-white/[0.03] to-white/[0.01] p-6 md:p-8 overflow-hidden">
+            {/* View Mode Toggle: Verified vs Recommended */}
+            <div className="flex items-center gap-2 border-b border-border/40 pb-4">
+              <button
+                onClick={() => setGallerySubTab("verified")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+                  gallerySubTab === "verified"
+                    ? "bg-white/[0.08] text-foreground border border-white/20 shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-white/[0.04]"
+                }`}
+              >
+                <Grid className="w-3.5 h-3.5" />
+                <span>Verified Architecture Suite (6)</span>
+              </button>
+              <button
+                onClick={() => setGallerySubTab("recommended")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+                  gallerySubTab === "recommended"
+                    ? "bg-primary/20 text-primary border border-primary/30 shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-white/[0.04]"
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-primary" />
+                <span>Recommended for this Project (RFC 016)</span>
+              </button>
+            </div>
+
+            {gallerySubTab === "recommended" ? (
+              <DiagramRecommendations
+                selectedProject={selectedProject || null}
+                onSelectDiagram={(id) => selectDiagram(id)}
+              />
+            ) : (
+              <>
+                {/* Hero / Header banner */}
+                <div className="relative rounded-2xl border border-border/40 bg-gradient-to-br from-white/[0.03] to-white/[0.01] p-6 md:p-8 overflow-hidden">
               <div className="absolute -right-16 -top-16 w-64 h-64 bg-primary/10 rounded-full blur-3xl pointer-events-none" />
               <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
                 <div>
@@ -742,6 +796,8 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram }: DiagramsTabProp
                 </div>
               </div>
             </div>
+            </>
+            )}
           </div>
         ) : (
           /* Interactive Viewer Mode */

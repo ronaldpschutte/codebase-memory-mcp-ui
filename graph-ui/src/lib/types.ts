@@ -139,6 +139,35 @@ export interface ReportDelta {
   fix_first_diff: number;
 }
 
+export interface DiagramRecommendation {
+  id: string;
+  title: string;
+  type: "sequence" | "architecture" | "fragility_network" | "dataflow" | "error_flow" | "clone_clusters" | "test_coverage" | string;
+  category: "behavioral" | "structural" | "quality" | "dataflow" | string;
+  utility_score: number;
+  priority: "critical" | "high" | "medium";
+  params: {
+    type: string;
+    entry_point?: string;
+    scope_path?: string;
+    max_depth?: number;
+    format: string;
+    [key: string]: any;
+  };
+  metrics?: Record<string, any>;
+  rationale: string;
+  mermaid?: string;
+}
+
+export interface DiagramRecommendationResult {
+  project: string;
+  db_path?: string;
+  total_candidates_evaluated: number;
+  recommendations_count: number;
+  recommendations: DiagramRecommendation[];
+  generated_at: string;
+}
+
 export interface PillarScore {
   score: number;
   max: number;

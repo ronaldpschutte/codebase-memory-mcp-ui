@@ -380,6 +380,7 @@ export function App() {
           <DiagramsTab
             initialDiagram={activeDiagram}
             onSelectDiagram={(d) => navigate("diagrams", selectedProject, d)}
+            selectedProject={selectedProject}
           />
         ) : activeTab === "tools" ? (
           <ToolsTab selectedProject={selectedProject} />
