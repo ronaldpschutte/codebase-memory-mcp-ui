@@ -7,7 +7,7 @@
 
 **The fastest and most efficient code intelligence engine for AI coding agents.** Full-indexes an average repository in milliseconds, the Linux kernel (28M LOC, 75K files) in 3 minutes. Answers structural queries in under 1ms. This npm wrapper downloads, verifies, and caches the selected native runtime set: the executable, its authenticated integration asset, and—when requested—the content-addressed UI pack.
 
-High-quality parsing through [tree-sitter](https://tree-sitter.github.io/tree-sitter/) AST analysis across 162 languages — producing a persistent knowledge graph of functions, classes, call chains, HTTP routes, and cross-service links. 17 MCP tools. No hosted service or API key; this package requires Node.js to manage and launch the cached native runtime set. Plug and play across 45 automatic/conditional client surfaces.
+High-quality parsing through [tree-sitter](https://tree-sitter.github.io/tree-sitter/) AST analysis across 162 languages — producing a persistent knowledge graph of functions, classes, call chains, HTTP routes, and cross-service links. 26 MCP tools. No hosted service or API key; this package requires Node.js to manage and launch the cached native runtime set. Plug and play across 45 automatic/conditional client surfaces.
 
 ## Installation
 
@@ -38,7 +38,7 @@ Restart your agent. Say **"Index this project"** — done.
 - **Lifecycle hooks stay conservative** — Kimi uses `UserPromptSubmit`; on macOS/Linux, GitLab Duo gets a fail-open user `SessionStart`, while Devin gets `UserPromptSubmit`, `PostCompaction`, and a deduplicated `SessionStart` when Claude does not already provide it. Qoder, GitLab Duo, Devin, and Factory hooks are withheld on Windows without a documented shell/executor contract. Cline's auto-activating file hooks are withheld because their context output is not reliably consumed, CodeBuddy beta hooks are not auto-installed, and Cursor context hooks remain withheld.
 - **Subagent access is explicit** — Claude, Gemini, Kiro, Qwen, CodeBuddy, KiloCode, Mistral Vibe, Grok Build, Qoder, Junie, and Factory get documented graph profiles with the narrowest tool/server filters their schemas support. KiloCode and Vibe enumerate read-only query tools rather than using server wildcards. Cursor, Rovo, Pochi, and Cline use explicit parent handoff where child MCP is unavailable or unsafe; IBM Bob receives no invented hook or agent.
 - **Manual, UI, cloud, or repository-managed (not counted)** — Qodo, Warp MCP, JetBrains AI/ACP, GitHub Copilot coding agent, Jules, CodeRabbit, Replit, BLACKBOX AI, Plandex, and SWE-agent. Warp is counted above for its detected skill installation; its MCP connection remains manual.
-- **17 MCP tools** — search, trace, architecture, impact analysis, Cypher queries, dead code detection, cross-service HTTP linking, ADR management, and more.
+- **26 MCP tools** — search, trace, blast radius, architecture, API surface, test coverage audit, code clones, dead code detection, diagram export, git coupling, env vars, error flow, Cypher queries, ADR management, and more.
 
 ## Supported Platforms
 
@@ -75,10 +75,10 @@ codebase-memory-mcp cli get_architecture '{}'
 
 | Category | Tools |
 |----------|-------|
-| **Indexing** | `index_repository`, `list_projects`, `delete_project`, `index_status` |
-| **Querying** | `search_graph`, `trace_call_path`, `detect_changes`, `query_graph` |
-| **Analysis** | `get_architecture`, `get_graph_schema`, `get_code_snippet`, `search_code` |
-| **Advanced** | `manage_adr`, `ingest_traces` |
+| **Indexing** | `index_repository`, `list_projects`, `delete_project`, `index_status`, `check_index_coverage` |
+| **Querying** | `search_graph`, `trace_path`, `detect_changes`, `query_graph`, `search_code`, `get_code_snippet`, `get_file_outline` |
+| **Architecture** | `get_architecture`, `get_graph_schema`, `compare_graphs`, `export_diagram`, `manage_adr`, `ingest_traces` |
+| **Deep Analysis & Quality** | `analyze_blast_radius`, `get_api_surface`, `audit_test_coverage`, `find_code_clones`, `get_coupled_files`, `get_env_vars`, `find_dead_code`, `trace_error_flow` |
 
 ## Performance
 

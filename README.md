@@ -16,7 +16,7 @@
 
 **The fastest and most efficient code intelligence engine for AI coding agents.** Full-indexes an average repository in milliseconds, the Linux kernel (28M LOC, 75K files) in 3 minutes. Answers structural queries in under 1ms. Ships as a native executable with a small verified runtime-asset set for macOS, Linux, and Windows — download, run `install`, done.
 
-High-quality parsing through [tree-sitter](https://tree-sitter.github.io/tree-sitter/) AST analysis across all 162 languages, enhanced with [**Hybrid LSP** semantic type resolution](#hybrid-lsp) for Python, TypeScript / JavaScript / JSX / TSX, PHP, C#, Go, C, C++, Java, Kotlin, Rust, and Perl — producing a persistent knowledge graph of functions, classes, call chains, HTTP routes, and cross-service links. 17 MCP tools. No language runtime, hosted service, or API key. Plug and play across 45 supported automatic/conditional client surfaces.
+High-quality parsing through [tree-sitter](https://tree-sitter.github.io/tree-sitter/) AST analysis across all 162 languages, enhanced with [**Hybrid LSP** semantic type resolution](#hybrid-lsp) for Python, TypeScript / JavaScript / JSX / TSX, PHP, C#, Go, C, C++, Java, Kotlin, Rust, and Perl — producing a persistent knowledge graph of functions, classes, call chains, HTTP routes, and cross-service links. 26 MCP tools. No language runtime, hosted service, or API key. Plug and play across 45 supported automatic/conditional client surfaces.
 
 > **Research** — The design and benchmarks behind this project are described in the preprint [*Codebase-Memory: Tree-Sitter-Based Knowledge Graphs for LLM Code Exploration via MCP*](https://arxiv.org/abs/2603.27277) (arXiv:2603.27277). Evaluated across 31 real-world repositories: 83% answer quality, 10× fewer tokens, 2.1× fewer tool calls vs. file-by-file exploration.
 
@@ -37,7 +37,7 @@ High-quality parsing through [tree-sitter](https://tree-sitter.github.io/tree-si
 - **45 supported automatic/conditional client surfaces** — `install` configures detected clients and safely activates conditional clients only when their documented platform, marker, or explicit existing config path is present. See [Multi-Agent Support](#multi-agent-support) for the complete matrix and manual/UI-only boundaries.
 - **Built-in graph visualization** — 3D interactive UI at `localhost:9749`, served from the binary itself.
 - **Infrastructure-as-code indexing** — Dockerfiles, Kubernetes manifests, and Kustomize overlays indexed as graph nodes with cross-references. `Resource` nodes for K8s kinds, `Module` nodes for Kustomize overlays with `IMPORTS` edges to referenced resources.
-- **17 MCP tools** — search, trace, architecture, impact analysis, targeted index-coverage checks, Cypher queries, dead code detection, cross-service HTTP linking, ADR management, and more.
+- **26 MCP tools** — search, trace, blast radius analysis, architecture, API surface, test coverage audit, code clone detection, dead code detection, diagram export, git coupling, environment variables, error flow tracing, targeted index-coverage checks, Cypher queries, ADR management, and more.
 
 ## Quick Start
 
@@ -470,7 +470,7 @@ Add to `~/.claude.json` (user scope) or project `.mcp.json`:
 }
 ```
 
-Restart your agent. Verify with `/mcp` — you should see `codebase-memory-mcp` with 17 tools.
+Restart your agent. Verify with `/mcp` — you should see `codebase-memory-mcp` with 26 tools.
 
 </details>
 
@@ -711,26 +711,40 @@ short, the next
 `index_repository` or `status` call for that project carries a `notice` suggesting the async
 mode. `index_status` keeps describing the published graph and its freshness.
 
-### Querying
+### Querying & Architecture
 
 | Tool | Description |
 |------|-------------|
 | `search_graph` | Structural, BM25, and semantic search. Page structural rows with `offset`/`limit` and ranked semantic rows independently with `semantic_offset`/`semantic_limit`. |
-| `trace_path` | BFS traversal — who calls a function and what it calls (alias: `trace_call_path`). Depth 1-5. |
+| `trace_path` | BFS traversal — who calls a function and what it calls (alias: `trace_call_path`). Depth 1-15, supports `calls`, `data_flow`, or `cross_service` modes. |
 | `detect_changes` | Map git diff to affected symbols + blast radius with risk classification. |
 | `query_graph` | Execute Cypher-like graph queries (read-only). |
-| `get_graph_schema` | Node/edge counts, relationship patterns, property definitions per label. Run this first. |
+| `get_graph_schema` | Node/edge counts, relationship patterns, property definitions per label (`diagnostics=full`). Run this first. |
 | `compare_graphs` | Compare two indexed snapshots: node/edge additions and removals between a base and a target. |
-| `get_code_snippet` | Read source code for a function by qualified name. |
+| `get_code_snippet` | Read source code for a function by qualified name (`auto`, `full`, `outline`). |
 | `get_file_outline` | Declaration outline of one repository-relative file in source order, with optional label filter and paging. |
 | `get_architecture` | Codebase overview: languages, packages, routes, hotspots, clusters, ADR. |
-| `search_code` | Grep-like text search within indexed project files. |
+| `export_diagram` | Generate deterministic architecture, sequence, dataflow, or package dependency diagrams directly from the knowledge graph in Mermaid, DOT, or SVG syntax. |
+| `search_code` | Graph-ranked text search within indexed project files (`compact`, `full`, `files`). |
 | `manage_adr` | CRUD for Architecture Decision Records (`get` reads, `update` replaces the whole document, `set_sections` rewrites only the named sections and leaves every other byte untouched, `sections` lists headings). Query modes do not wait behind a same-project reindex; writes remain serialized. |
 | `ingest_traces` | Ingest runtime traces to validate HTTP_CALLS edges. |
 
 `manage_adr(mode='set_sections')` writes one or more sections by name and splices them into the stored document, so text outside the named sections — including a preamble, code fences and section ordering — is preserved byte-for-byte. Any `## Heading` works, not just the conventional PURPOSE / STACK / ARCHITECTURE / PATTERNS / TRADEOFFS / PHILOSOPHY set; names match exactly, including case. Writing the same section twice is a no-op, so a retry after a lost response cannot duplicate content.
 
 `manage_adr` query modes (`get` and `sections`) use the server's cached query store so they can proceed while a same-project reindex is running. If another process publishes a replacement store during reindexing, they can return the pre-publication ADR until idle eviction refreshes that cache. Updates remain serialized through the project mutation guard.
+
+### Code Quality & Deep Analysis
+
+| Tool | Description |
+|------|-------------|
+| `analyze_blast_radius` | Compute comprehensive blast radius for a symbol or file: downstream callers, exposed public routes, covering tests, git history co-changes, and composite risk assessment. See [RFC 001](docs/RFC_001_analyze_blast_radius.md). |
+| `get_api_surface` | Returns the complete API contract surface of a codebase, including ingress HTTP/RPC endpoints (routes, methods, controller handlers) and egress third-party HTTP calls, webhooks, and message broker queues. See [RFC 002](docs/RFC_002_get_api_surface.md). |
+| `audit_test_coverage` | Audits test coverage mapping across a project: finds tests covering a specific symbol/file, or identifies critical untested entry points ranked by architectural importance score (`gaps`, `symbol_tests`, `summary`). See [RFC 003](docs/RFC_003_audit_test_coverage.md). |
+| `find_code_clones` | Discovers duplicate or near-duplicate functions and structural code clones across a project using pre-computed MinHash AST similarity and semantic graph edges (`structural`, `semantic`, `all`). See [RFC 004](docs/RFC_004_find_code_clones.md). |
+| `get_coupled_files` | Returns the 'hidden companion files' that historically commit together with a target file based on mined git history (`FILE_CHANGES_WITH`), preventing forgotten edits and out-of-sync migrations. See [RFC 005](docs/RFC_005_get_coupled_files.md). |
+| `get_env_vars` | Returns the environment variables and configuration parameters used by the project, including where they are read in code, detected fallback defaults, consuming modules, and optional `.env.example` template generation. See [RFC 006](docs/RFC_006_get_env_vars.md). |
+| `find_dead_code` | Audits the codebase for unreferenced functions, classes, and variables with zero inbound callers or usages, filtering out public API exports, entry points, and test suites. See [RFC 007](docs/RFC_007_find_dead_code.md). |
+| `trace_error_flow` | Traces error and exception propagation across a call tree: discovers all exception types that can bubble up to a target function or route from downstream callees. See [RFC 008](docs/RFC_008_trace_error_flow.md). |
 
 ## Graph Data Model
 
@@ -890,7 +904,7 @@ Also supported (not yet benchmarked): Ada, Agda, Apex, Assembly (NASM), Astro, A
 src/
   main.c              Entry point (MCP stdio server + CLI + install/update/config)
   daemon/             Per-account session coordination, IPC, lifecycle, shared jobs/watchers
-  mcp/                MCP server (17 tools, JSON-RPC 2.0, session detection, auto-index)
+  mcp/                MCP server (26 tools, JSON-RPC 2.0, session detection, auto-index)
   cli/                Install/uninstall/update/config (45 client surfaces, hooks, instructions)
   store/              SQLite graph storage (nodes, edges, traversal, search, Louvain)
   pipeline/           Multi-pass indexing (structure → definitions → calls → HTTP links → config → tests)
