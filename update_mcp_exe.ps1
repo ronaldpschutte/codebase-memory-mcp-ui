@@ -86,6 +86,12 @@ try {
     Write-Warning "      Execution check returned: $_"
 }
 
+if ($StartDaemon) {
+    Write-Host ""
+    Write-Host "      Starting background daemon on port 9749..." -ForegroundColor Cyan
+    & $TargetExe daemon start --port=9749
+}
+
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
 Write-Host "  MCP executable update complete!" -ForegroundColor Green
