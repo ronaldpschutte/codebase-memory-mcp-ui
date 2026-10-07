@@ -14987,6 +14987,30 @@ TEST(cli_installed_skill_limits_match_server_contract) {
     PASS();
 }
 
+TEST(cli_installed_skill_documents_all_26_tools) {
+    const cbm_skill_t *installed = cbm_get_skills();
+    ASSERT_NOT_NULL(installed);
+    ASSERT_NOT_NULL(installed[0].content);
+    static const char *const tools[] = {
+        "index_repository", "search_graph", "query_graph", "trace_path",
+        "analyze_blast_radius", "get_api_surface", "audit_test_coverage",
+        "find_code_clones", "get_coupled_files", "get_env_vars",
+        "find_dead_code", "trace_error_flow", "get_code_snippet",
+        "get_file_outline", "get_graph_schema", "compare_graphs",
+        "get_architecture", "export_diagram", "search_code",
+        "list_projects", "delete_project", "index_status",
+        "check_index_coverage", "detect_changes", "manage_adr",
+        "ingest_traces"
+    };
+    for (size_t i = 0; i < sizeof(tools) / sizeof(tools[0]); i++) {
+        if (!strstr(installed[0].content, tools[i])) {
+            fprintf(stderr, "Missing tool in skill: %s\n", tools[i]);
+        }
+        ASSERT(strstr(installed[0].content, tools[i]) != NULL);
+    }
+    PASS();
+}
+
 /* ═══════════════════════════════════════════════════════════════════
  *  Group D: Pre-Tool Hook Upsert — Claude Code
  * ═══════════════════════════════════════════════════════════════════ */
@@ -18032,6 +18056,7 @@ SUITE(cli) {
     RUN_TEST(cli_qwen_windows_hook_command_uses_powershell_schema);
     RUN_TEST(cli_windows_optional_hooks_require_a_documented_shell);
     RUN_TEST(cli_installed_skill_limits_match_server_contract);
+    RUN_TEST(cli_installed_skill_documents_all_26_tools);
 
     /* Claude Code hooks (5 tests — group D) */
     RUN_TEST(cli_hook_gate_script_no_predictable_tmp_issue384);
