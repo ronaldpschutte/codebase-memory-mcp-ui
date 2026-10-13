@@ -83,4 +83,93 @@ describe("DiagramsTab", () => {
       expect(openMock).toHaveBeenCalled();
     });
   });
+
+  it("switches to Recommended Diagrams sub-tab and renders recommendations grid with source citations", async () => {
+    render(<DiagramsTab selectedProject="my-test-project" />);
+
+    const recsBtn = screen.getByRole("button", { name: /Recommended for this Project/i });
+    expect(recsBtn).toBeInTheDocument();
+
+    fireEvent.click(recsBtn);
+
+    expect(await screen.findByTestId("recommendations-grid")).toBeInTheDocument();
+    expect(screen.getByText(/Recommended Diagrams for/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/AST Validated/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Launch Interactive Viewer/i).length).toBeGreaterThan(0);
+  });
+
+  it("navigates to stylized viewer when a recommended diagram card is clicked", async () => {
+    const onSelectDiagram = vi.fn();
+    render(<DiagramsTab onSelectDiagram={onSelectDiagram} selectedProject="my-test-project" />);
+
+    // Switch to recommendations
+    fireEvent.click(screen.getByRole("button", { name: /Recommended for this Project/i }));
+    expect(await screen.findByTestId("recommendations-grid")).toBeInTheDocument();
+
+    // Find and click the sequence recommendation card
+    const card = screen.getByTestId("rec-card-seq-extract-file-ex-body");
+    fireEvent.click(card);
+
+    expect(onSelectDiagram).toHaveBeenCalledWith("seq-extract-file-ex-body");
+
+    // Expect viewer to mount with stylized canvas
+    expect(await screen.findByTitle("Call Sequence: extract_file_ex_body")).toBeInTheDocument();
+    expect(screen.getByText("Stylized Canvas")).toBeInTheDocument();
+    expect(screen.getByText("Mermaid AST")).toBeInTheDocument();
+    expect(screen.getByText("Spec")).toBeInTheDocument();
+    expect(screen.getByText("Open Standalone")).toBeInTheDocument();
+  });
+
+  it("allows inspecting AST code modal from a recommendation card", async () => {
+    render(<DiagramsTab selectedProject="my-test-project" />);
+
+    // Switch to recommendations
+    fireEvent.click(screen.getByRole("button", { name: /Recommended for this Project/i }));
+    expect(await screen.findByTestId("recommendations-grid")).toBeInTheDocument();
+
+    // Click filter for Behavioral
+    const behavioralFilterBtn = screen.getByRole("button", { name: /Behavioral/i });
+    fireEvent.click(behavioralFilterBtn);
+
+    // Click Inspect AST Code button on the card
+    const inspectBtn = await screen.findAllByTitle(/Inspect AST Code/i);
+    expect(inspectBtn.length).toBeGreaterThan(0);
+    fireEvent.click(inspectBtn[0]);
+
+    // Expect preview modal to appear
+    expect(await screen.findByTestId("diagram-preview-modal")).toBeInTheDocument();
+    expect(screen.getByText(/Generated Mermaid Specification/i)).toBeInTheDocument();
+
+    // Close modal
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByTestId("diagram-preview-modal")).not.toBeInTheDocument();
+  });
+
+  it("supports toggling between Stylized Canvas and Mermaid AST on recommended diagrams", async () => {
+    render(<DiagramsTab initialDiagram="seq-extract-file-ex-body" />);
+
+    expect(await screen.findByTitle("Call Sequence: extract_file_ex_body")).toBeInTheDocument();
+
+    // Switch to Mermaid AST
+    const mermaidBtn = screen.getByRole("button", { name: /Mermaid AST/i });
+    fireEvent.click(mermaidBtn);
+
+    // Switch back to Stylized Canvas
+    const stylizedBtn = screen.getByRole("button", { name: /Stylized Canvas/i });
+    fireEvent.click(stylizedBtn);
+
+    expect(screen.getByTitle("Call Sequence: extract_file_ex_body")).toBeInTheDocument();
+  });
+
+  it("renders System Overview hero card and Previously Generated Diagrams section on the overview screen", () => {
+    render(<DiagramsTab />);
+
+    expect(screen.getByRole("heading", { name: "System Overview" })).toBeInTheDocument();
+    expect(screen.getByText("Post-Index Verified")).toBeInTheDocument();
+    expect(screen.getByText(/Previously Generated Diagrams/i)).toBeInTheDocument();
+    expect(screen.getByText(/Saved in repository/i)).toBeInTheDocument();
+    expect(screen.getByText("Launch Interactive System Overview")).toBeInTheDocument();
+  });
 });
+
+

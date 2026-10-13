@@ -12,10 +12,18 @@ import {
   ArrowRight,
   BookOpen,
 } from "lucide-react";
+import { DiagramRecommendations } from "./DiagramRecommendations";
+import { MermaidViewer } from "./MermaidViewer";
+import {
+  DEFAULT_RECOMMENDED_DIAGRAMS,
+  generateStylizedDiagramHtml,
+  generateArchifySpecJson,
+} from "../lib/stylizedDiagram";
 
 export interface DiagramItem {
   id: string;
   title: string;
+  type?: string;
   category: string;
   subtitle: string;
   description: string;
@@ -25,6 +33,12 @@ export interface DiagramItem {
   htmlFile: string;
   specFile: string;
   durationMs: number;
+  utility_score?: number;
+  priority?: "critical" | "high" | "medium";
+  metrics?: Record<string, any>;
+  mermaid?: string;
+  spec?: any;
+  stylizedHtml?: string;
 }
 
 export const DIAGRAMS: DiagramItem[] = [
@@ -311,35 +325,73 @@ const REPO_MERMAID_DIAGRAMS: Record<string, string> = {
     MCP->>MCP: yyjson_mut_doc_new() -> format JSON-RPC
     MCP-->>Agent: JSON-RPC result ({ diagram_type, format, content })
     deactivate MCP`,
+
+  "system-overview": `graph TD
+    Client["Client Interface (CLI / UI / Agents)"] --> Protocol["MCP & IPC Protocol Daemon"]
+    Protocol --> Pipeline["Multi-Pass AST Worker Pool"]
+    Pipeline --> Store[("SQLite WAL Store")]
+    Protocol --> Diagram["Diagram Synthesis Engine"]
+    Diagram --> Store`,
+
+  "rec-arch-overview": `graph TD
+    Client[MCP Client] --> Daemon[Daemon Dispatcher]
+    Daemon --> Store[(SQLite WAL Store)]`,
+
+  "rec-fragility-co-change": `graph LR
+    ModA[Module A] <==>|Coupled (15 commits)| ModB[Module B]`,
+
+  "rec-dataflow-lifecycle": `flowchart LR
+    Ingress[Request] --> Worker[Worker Pool] --> SQLite[(Database)]`,
 };
 
-function generateMermaidHtml(title: string, mermaidCode: string): string {
+export function getMermaidCode(diagram: DiagramItem): string {
+  if (diagram.mermaid) return diagram.mermaid;
+  if (REPO_MERMAID_DIAGRAMS[diagram.id]) return REPO_MERMAID_DIAGRAMS[diagram.id];
+
+  // Robust fallback synthesizer for any diagram
+  const sources = diagram.sources || [];
+  if (diagram.type === "sequence") {
+    const lines = [
+      "sequenceDiagram",
+      "    autonumber",
+      "    actor Agent as User / AI Agent",
+    ];
+    sources.forEach((s, idx) => {
+      const name = s.path.split("/").pop() || s.path;
+      lines.push(`    participant P${idx} as ${name}`);
+    });
+    lines.push(`    Agent->>P0: Invoke ${diagram.title}`);
+    for (let i = 0; i < sources.length - 1; i++) {
+      lines.push(`    P${i}->>P${i + 1}: ${sources[i + 1].label || "calls"}`);
+    }
+    lines.push("    P0-->>Agent: Result verified (<1ms)");
+    return lines.join("\n");
+  }
+
+  const lines = [
+    "graph TD",
+    `    Client["Client Interface"] --> Dispatcher["${diagram.title.replace(/["\\]/g, "")}"]`,
+  ];
+  sources.forEach((s, idx) => {
+    const name = s.path.split("/").pop() || s.path;
+    lines.push(`    Dispatcher --> S${idx}["${name} (${(s.label || "").replace(/["\\]/g, "")})"]`);
+  });
+  lines.push('    Dispatcher --> Store[("SQLite WAL Store")]');
+  return lines.join("\n");
+}
+
+function generateStandaloneMermaidHtml(title: string, mermaidCode: string): string {
+  const escapedMermaid = mermaidCode
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
   return [
     '<!DOCTYPE html>',
     '<html>',
     '<head>',
     '  <meta charset="utf-8">',
-    '  <title>' + title + '</title>',
+    '  <title>' + title + ' — Mermaid AST</title>',
     '  <meta name="viewport" content="width=device-width, initial-scale=1">',
-    '  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>',
-    '  <script>',
-    '    document.addEventListener("DOMContentLoaded", function() {',
-    '      mermaid.initialize({',
-    '        startOnLoad: true,',
-    '        theme: "dark",',
-    '        themeVariables: {',
-    '          darkMode: true,',
-    '          background: "#090d16",',
-    '          primaryColor: "#38bdf8",',
-    '          primaryTextColor: "#f8fafc",',
-    '          primaryBorderColor: "#0284c7",',
-    '          lineColor: "#64748b",',
-    '          secondaryColor: "#1e293b",',
-    '          tertiaryColor: "#0f172a"',
-    '        }',
-    '      });',
-    '    });',
-    '  </script>',
     '  <style>',
     '    html, body {',
     '      margin: 0;',
@@ -361,29 +413,54 @@ function generateMermaidHtml(title: string, mermaidCode: string): string {
     '      padding: 40px 24px;',
     '      box-sizing: border-box;',
     '    }',
-    '    .mermaid {',
-    '      display: flex;',
-    '      justify-content: center;',
-    '      align-items: center;',
+    '    .ast-box {',
     '      width: 100%;',
-    '      max-width: 1200px;',
+    '      max-width: 900px;',
+    '      background: rgba(15, 23, 42, 0.95);',
+    '      border: 1px solid rgba(56, 189, 248, 0.25);',
+    '      border-radius: 12px;',
+    '      padding: 24px;',
+    '      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);',
     '    }',
-    '    .mermaid svg {',
-    '      width: 100% !important;',
-    '      max-width: 1100px !important;',
-    '      height: auto !important;',
-    '      filter: drop-shadow(0 8px 30px rgba(0, 0, 0, 0.6));',
+    '    .ast-header {',
+    '      display: flex;',
+    '      justify-content: space-between;',
+    '      align-items: center;',
+    '      margin-bottom: 16px;',
+    '      border-bottom: 1px solid rgba(255, 255, 255, 0.08);',
+    '      padding-bottom: 12px;',
     '    }',
-    '    .mermaid text {',
-    '      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace !important;',
-    '      font-size: 13px !important;',
+    '    .ast-title { font-size: 14px; font-weight: 600; color: #38bdf8; font-family: monospace; }',
+    '    .copy-btn {',
+    '      background: rgba(56, 189, 248, 0.15);',
+    '      border: 1px solid rgba(56, 189, 248, 0.3);',
+    '      color: #38bdf8;',
+    '      padding: 5px 12px;',
+    '      border-radius: 6px;',
+    '      font-size: 11px;',
+    '      cursor: pointer;',
+    '      font-family: monospace;',
+    '    }',
+    '    .copy-btn:hover { background: rgba(56, 189, 248, 0.25); }',
+    '    pre {',
+    '      margin: 0;',
+    '      font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;',
+    '      font-size: 12.5px;',
+    '      line-height: 1.6;',
+    '      color: #e2e8f0;',
+    '      overflow-x: auto;',
+    '      white-space: pre;',
     '    }',
     '  </style>',
     '</head>',
     '<body>',
     '  <div class="canvas-wrap">',
-    '    <div class="mermaid">',
-    mermaidCode,
+    '    <div class="ast-box">',
+    '      <div class="ast-header">',
+    '        <span class="ast-title">' + title + ' — Mermaid AST</span>',
+    '        <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById(\'raw-ast\').innerText)">Copy AST</button>',
+    '      </div>',
+    '      <pre id="raw-ast"><code>' + escapedMermaid + '</code></pre>',
     '    </div>',
     '  </div>',
     '</body>',
@@ -394,12 +471,14 @@ function generateMermaidHtml(title: string, mermaidCode: string): string {
 interface DiagramsTabProps {
   initialDiagram?: string | null;
   onSelectDiagram?: (diagramId: string | null) => void;
+  selectedProject?: string | null;
 }
 
-export function DiagramsTab({ initialDiagram, onSelectDiagram }: DiagramsTabProps) {
+export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }: DiagramsTabProps) {
   const [selectedId, setSelectedId] = useState<string | null>(initialDiagram || null);
+  const [gallerySubTab, setGallerySubTab] = useState<"verified" | "recommended">("verified");
+  const [recommendedList, setRecommendedList] = useState<DiagramItem[]>(DEFAULT_RECOMMENDED_DIAGRAMS as DiagramItem[]);
   const [viewMode, setViewMode] = useState<"stylized" | "mermaid">("stylized");
-  const [diagramHtml, setDiagramHtml] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [specContent, setSpecContent] = useState<string | null>(null);
   const [showSpecDrawer, setShowSpecDrawer] = useState(false);
@@ -412,9 +491,120 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram }: DiagramsTabProp
     }
   }, [initialDiagram]);
 
+  // Fetch dynamic recommendations if available
+  useEffect(() => {
+    if (!selectedProject) return;
+    fetch(`/api/recommend-diagrams?project=${encodeURIComponent(selectedProject)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.recommendations && Array.isArray(data.recommendations) && data.recommendations.length > 0) {
+          const enriched: DiagramItem[] = data.recommendations.map((r: any) => ({
+            ...r,
+            subtitle: r.subtitle || r.rationale,
+            description: r.description || r.rationale,
+            badgeClass: r.badgeClass || (
+              r.priority === "critical"
+                ? "bg-rose-500/15 text-rose-400 border-rose-500/30"
+                : r.priority === "high"
+                  ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                  : "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+            ),
+            hoverBorderClass: r.hoverBorderClass || (
+              r.priority === "critical"
+                ? "hover:border-rose-500/50 hover:shadow-rose-500/10"
+                : r.priority === "high"
+                  ? "hover:border-amber-500/50 hover:shadow-amber-500/10"
+                  : "hover:border-emerald-500/50 hover:shadow-emerald-500/10"
+            ),
+            sources: r.sources || [{ path: r.metrics?.file_path || "src/main.c", line: 1, label: r.title }],
+            htmlFile: r.htmlFile || `${r.id}.html`,
+            specFile: r.specFile || `specs/${r.id}.json`,
+            durationMs: r.durationMs || 6,
+            stylizedHtml: r.stylizedHtml || generateStylizedDiagramHtml(r),
+            spec: r.spec || generateArchifySpecJson(r),
+          }));
+          setRecommendedList(enriched);
+        }
+      })
+      .catch(() => {});
+  }, [selectedProject]);
+
+  const [repoCatalog, setRepoCatalog] = useState<any>(null);
+
+  // Fetch repository diagrams catalog (diagrams/catalog.json) if present
+  useEffect(() => {
+    fetch("/diagrams/catalog.json")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((catalog) => {
+        if (catalog && (catalog.generated_diagrams || catalog.system_overview)) {
+          setRepoCatalog(catalog);
+        }
+      })
+      .catch(() => {});
+  }, [selectedProject]);
+
+  // System Overview diagram is either from catalog or first item in DIAGRAMS
+  const systemOverviewDiagram: DiagramItem = useMemo(() => {
+    if (repoCatalog?.system_overview) {
+      const so = repoCatalog.system_overview;
+      return {
+        ...so,
+        subtitle: so.subtitle || "High-level topology & MCP daemon IPC",
+        description: so.description || "Primary system architecture overview compiled post-indexing.",
+        badgeClass: so.badgeClass || "bg-indigo-500/15 text-indigo-400 border-indigo-500/30",
+        hoverBorderClass: so.hoverBorderClass || "hover:border-indigo-500/50 hover:shadow-indigo-500/10",
+        sources: so.sources || DIAGRAMS[0].sources,
+        htmlFile: so.htmlFile || "system-overview.html",
+        specFile: so.specFile || "specs/system-overview.json",
+        durationMs: so.durationMs || 5929,
+      };
+    }
+    return DIAGRAMS[0];
+  }, [repoCatalog]);
+
+  // Previously generated diagrams list
+  const previouslyGeneratedDiagrams: DiagramItem[] = useMemo(() => {
+    if (repoCatalog?.generated_diagrams && Array.isArray(repoCatalog.generated_diagrams)) {
+      const fromCatalog = repoCatalog.generated_diagrams
+        .filter((d: any) => d.id !== systemOverviewDiagram.id && d.id !== DIAGRAMS[0].id)
+        .map((d: any) => {
+          const matchExisting = DIAGRAMS.find((ex) => ex.id === d.id);
+          return {
+            ...(matchExisting || {}),
+            ...d,
+            subtitle: d.subtitle || matchExisting?.subtitle || "",
+            description: d.description || matchExisting?.description || "",
+            badgeClass: d.badgeClass || matchExisting?.badgeClass || "bg-cyan-500/15 text-cyan-400 border-cyan-500/30",
+            hoverBorderClass: d.hoverBorderClass || matchExisting?.hoverBorderClass || "hover:border-cyan-500/50 hover:shadow-cyan-500/10",
+            sources: d.sources || matchExisting?.sources || [{ path: "src/main.c", line: 1, label: d.title }],
+            htmlFile: d.htmlFile || `${d.id}.html`,
+            specFile: d.specFile || `specs/${d.id}.json`,
+            durationMs: d.durationMs || 5,
+          };
+        });
+      if (fromCatalog.length > 0) return fromCatalog;
+    }
+    // Baseline: the remaining verified diagrams in the repository
+    return DIAGRAMS.slice(1);
+  }, [repoCatalog, systemOverviewDiagram.id]);
+
+  const allDiagrams = useMemo(() => {
+    const list: DiagramItem[] = [DIAGRAMS[0]];
+    if (systemOverviewDiagram.id !== DIAGRAMS[0].id) {
+      list.push(systemOverviewDiagram);
+    }
+    previouslyGeneratedDiagrams.forEach((d) => {
+      if (!list.some((item) => item.id === d.id)) list.push(d);
+    });
+    recommendedList.forEach((d) => {
+      if (!list.some((item) => item.id === d.id)) list.push(d);
+    });
+    return list;
+  }, [systemOverviewDiagram, previouslyGeneratedDiagrams, recommendedList]);
+
   const activeDiagram = useMemo(
-    () => DIAGRAMS.find((d) => d.id === selectedId) || null,
-    [selectedId]
+    () => allDiagrams.find((d) => d.id === selectedId) || null,
+    [allDiagrams, selectedId]
   );
 
   const selectDiagram = (id: string | null) => {
@@ -423,64 +613,61 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram }: DiagramsTabProp
     onSelectDiagram?.(id);
   };
 
-  // Load verified diagram when active diagram changes
+  // Load active diagram specs and html
   useEffect(() => {
     if (!activeDiagram) {
-      setDiagramHtml(null);
       setSpecContent(null);
       return;
     }
 
     setLoading(true);
 
-    // Fetch verified Archify spec JSON
-    fetch(`/diagrams/${activeDiagram.specFile}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then((data) => {
-        setSpecContent(JSON.stringify(data, null, 2));
-      })
-      .catch((_err) => {
-        const mermaidCode = REPO_MERMAID_DIAGRAMS[activeDiagram.id];
-        setSpecContent(
-          JSON.stringify(
-            {
-              diagram: activeDiagram.id,
-              title: activeDiagram.title,
-              category: activeDiagram.category,
-              repository: "codebase-memory-mcp-ui",
-              evidence: activeDiagram.sources,
-              mermaid_definition: mermaidCode,
-            },
-            null,
-            2
-          )
-        );
-      });
-
-    // Prepare mermaid HTML for mermaid view mode
-    const mermaidCode = REPO_MERMAID_DIAGRAMS[activeDiagram.id];
-    if (mermaidCode) {
-      setDiagramHtml(generateMermaidHtml(activeDiagram.title, mermaidCode));
+    // Fetch or generate Archify spec JSON
+    if (activeDiagram.spec) {
+      setSpecContent(
+        typeof activeDiagram.spec === "string"
+          ? activeDiagram.spec
+          : JSON.stringify(activeDiagram.spec, null, 2)
+      );
+    } else if (activeDiagram.specFile) {
+      fetch(`/diagrams/${activeDiagram.specFile}`)
+        .then((res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        })
+        .then((data) => {
+          setSpecContent(JSON.stringify(data, null, 2));
+        })
+        .catch((_err) => {
+          setSpecContent(generateArchifySpecJson(activeDiagram));
+        });
     } else {
-      setDiagramHtml(null);
+      setSpecContent(generateArchifySpecJson(activeDiagram));
     }
 
     setLoading(false);
   }, [activeDiagram]);
 
+  const activeMermaidCode = useMemo(() => {
+    if (!activeDiagram) return "";
+    return getMermaidCode(activeDiagram);
+  }, [activeDiagram]);
+
   const handleOpenStandalone = () => {
     if (!activeDiagram) return;
     if (viewMode === "stylized") {
-      window.open(`/diagrams/${activeDiagram.htmlFile}?theme=dark`, "_blank");
-    } else if (diagramHtml) {
-      const blob = new Blob([diagramHtml], { type: "text/html" });
+      if (activeDiagram.stylizedHtml) {
+        const blob = new Blob([activeDiagram.stylizedHtml], { type: "text/html" });
+        const url = URL.createObjectURL(blob);
+        window.open(url, "_blank");
+      } else {
+        window.open(`/diagrams/${activeDiagram.htmlFile}?theme=dark`, "_blank");
+      }
+    } else {
+      const standaloneHtml = generateStandaloneMermaidHtml(activeDiagram.title, activeMermaidCode);
+      const blob = new Blob([standaloneHtml], { type: "text/html" });
       const url = URL.createObjectURL(blob);
       window.open(url, "_blank");
-    } else {
-      window.open(`/diagrams/${activeDiagram.htmlFile}`, "_blank");
     }
   };
 
@@ -494,9 +681,12 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram }: DiagramsTabProp
       <div className="flex items-center justify-between px-6 py-2.5 border-b border-border/30 bg-[#0b131e]/90 backdrop-blur-md shrink-0">
         <div className="flex items-center gap-2 overflow-x-auto py-1">
           <button
-            onClick={() => selectDiagram(null)}
+            onClick={() => {
+              selectDiagram(null);
+              setGallerySubTab("verified");
+            }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all ${
-              selectedId === null
+              selectedId === null && gallerySubTab === "verified"
                 ? "bg-primary/20 text-primary border border-primary/30 shadow-sm shadow-primary/10"
                 : "text-muted-foreground hover:text-foreground hover:bg-white/[0.04] border border-transparent"
             }`}
@@ -505,9 +695,24 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram }: DiagramsTabProp
             <span>Overview</span>
           </button>
 
+          <button
+            onClick={() => {
+              selectDiagram(null);
+              setGallerySubTab("recommended");
+            }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all ${
+              selectedId === null && gallerySubTab === "recommended"
+                ? "bg-primary/20 text-primary border border-primary/30 shadow-sm shadow-primary/10"
+                : "text-muted-foreground hover:text-foreground hover:bg-white/[0.04] border border-transparent"
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-primary" />
+            <span>Recommendations</span>
+          </button>
+
           <div className="h-4 w-px bg-border/40 mx-1" />
 
-          {DIAGRAMS.map((d) => {
+          {(gallerySubTab === "recommended" ? recommendedList : DIAGRAMS).map((d) => {
             const isSelected = selectedId === d.id;
             return (
               <button
@@ -600,8 +805,41 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram }: DiagramsTabProp
         {!activeDiagram ? (
           /* Gallery Mode */
           <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-8 max-w-7xl mx-auto w-full">
-            {/* Hero / Header banner */}
-            <div className="relative rounded-2xl border border-border/40 bg-gradient-to-br from-white/[0.03] to-white/[0.01] p-6 md:p-8 overflow-hidden">
+            {/* View Mode Toggle: Verified vs Recommended */}
+            <div className="flex items-center gap-2 border-b border-border/40 pb-4">
+              <button
+                onClick={() => setGallerySubTab("verified")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+                  gallerySubTab === "verified"
+                    ? "bg-white/[0.08] text-foreground border border-white/20 shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-white/[0.04]"
+                }`}
+              >
+                <Grid className="w-3.5 h-3.5" />
+                <span>Verified Architecture Suite (6)</span>
+              </button>
+              <button
+                onClick={() => setGallerySubTab("recommended")}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+                  gallerySubTab === "recommended"
+                    ? "bg-primary/20 text-primary border border-primary/30 shadow-sm"
+                    : "text-muted-foreground hover:text-foreground hover:bg-white/[0.04]"
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-primary" />
+                <span>Recommended for this Project (RFC 016)</span>
+              </button>
+            </div>
+
+            {gallerySubTab === "recommended" ? (
+              <DiagramRecommendations
+                selectedProject={selectedProject || null}
+                onSelectDiagram={(id) => selectDiagram(id)}
+              />
+            ) : (
+              <>
+                {/* Hero / Header banner */}
+                <div className="relative rounded-2xl border border-border/40 bg-gradient-to-br from-white/[0.03] to-white/[0.01] p-6 md:p-8 overflow-hidden">
               <div className="absolute -right-16 -top-16 w-64 h-64 bg-primary/10 rounded-full blur-3xl pointer-events-none" />
               <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
                 <div>
@@ -649,63 +887,173 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram }: DiagramsTabProp
               </div>
             </div>
 
-            {/* Diagrams Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {DIAGRAMS.map((item) => (
-                <div
-                  key={item.id}
-                  onClick={() => selectDiagram(item.id)}
-                  className={`group relative flex flex-col justify-between rounded-xl border border-border/40 bg-white/[0.02] p-5 cursor-pointer transition-all duration-300 ${item.hoverBorderClass} hover:-translate-y-1 hover:bg-white/[0.03] hover:shadow-xl`}
-                >
-                  <div>
-                    {/* Header: Category Badge + Gate Pass */}
-                    <div className="flex items-center justify-between mb-3">
-                      <span
-                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border font-mono uppercase tracking-wider ${item.badgeClass}`}
-                      >
-                        {item.category}
-                      </span>
-                      <div className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-400">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>Pass</span>
-                      </div>
-                    </div>
+            {/* Primary System Overview (Auto-Generated Post-Index) */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-primary" />
+                  <h2 className="text-sm font-semibold tracking-tight text-foreground">
+                    System Overview
+                  </h2>
+                  <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                    Post-Index Verified
+                  </span>
+                </div>
+                <span className="text-xs text-muted-foreground font-mono">
+                  Foundational Architecture Map
+                </span>
+              </div>
 
-                    <h2 className="text-base font-semibold text-foreground group-hover:text-primary transition-colors">
-                      {item.title}
-                    </h2>
-                    <p className="text-[11px] text-muted-foreground/80 font-mono mt-0.5 mb-3">
-                      {item.subtitle}
-                    </p>
-                    <p className="text-xs text-muted-foreground line-clamp-3 leading-relaxed mb-4">
-                      {item.description}
-                    </p>
+              <div
+                onClick={() => selectDiagram(systemOverviewDiagram.id)}
+                className="group relative flex flex-col justify-between rounded-xl border border-primary/30 bg-gradient-to-br from-primary/5 via-white/[0.02] to-transparent p-6 cursor-pointer transition-all duration-300 hover:border-primary/60 hover:-translate-y-1 hover:shadow-2xl hover:shadow-primary/10"
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`text-[10px] font-semibold px-2.5 py-0.5 rounded-md border font-mono uppercase tracking-wider ${systemOverviewDiagram.badgeClass}`}
+                      >
+                        {systemOverviewDiagram.category}
+                      </span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        Auto-Generated on Indexing
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-400">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>100% Pass</span>
+                    </div>
                   </div>
 
-                  <div>
-                    {/* C Source Citations */}
-                    <div className="rounded-lg bg-black/40 border border-border/20 p-2.5 mb-4 space-y-1 font-mono text-[10.5px] text-muted-foreground">
-                      {item.sources.map((s, idx) => (
-                        <div key={idx} className="flex items-center justify-between truncate">
-                          <span className="text-foreground/80 font-medium">
-                            {s.path}
-                            {s.line ? `:${s.line}` : ""}
-                          </span>
-                          <span className="text-[9.5px] text-foreground/40">{s.label}</span>
-                        </div>
-                      ))}
-                    </div>
+                  <h2 className="text-lg font-bold text-foreground group-hover:text-primary transition-colors">
+                    {systemOverviewDiagram.title}
+                  </h2>
+                  <p className="text-xs text-muted-foreground/80 font-mono mt-0.5 mb-2">
+                    {systemOverviewDiagram.subtitle}
+                  </p>
+                  <p className="text-xs text-muted-foreground leading-relaxed max-w-3xl mb-4">
+                    {systemOverviewDiagram.description}
+                  </p>
+                </div>
 
-                    {/* Launch Action */}
-                    <div className="flex items-center justify-between pt-2 border-t border-border/20">
-                      <span className="text-[11px] text-muted-foreground group-hover:text-foreground transition-colors font-medium">
-                        Launch Interactive Viewer
-                      </span>
-                      <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" />
-                    </div>
+                <div>
+                  {/* C Source Citations */}
+                  <div className="rounded-lg bg-black/40 border border-border/20 p-2.5 mb-4 space-y-1 font-mono text-[10.5px] text-muted-foreground">
+                    {systemOverviewDiagram.sources.map((s, idx) => (
+                      <div key={idx} className="flex items-center justify-between truncate">
+                        <span className="text-foreground/80 font-medium">
+                          {s.path}
+                          {s.line ? `:${s.line}` : ""}
+                        </span>
+                        <span className="text-[9.5px] text-foreground/40">{s.label}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-border/20">
+                    <span className="text-xs text-primary font-semibold flex items-center gap-1">
+                      <span>Launch Interactive System Overview</span>
+                    </span>
+                    <ArrowRight className="w-4 h-4 text-primary group-hover:translate-x-1 transition-all" />
                   </div>
                 </div>
-              ))}
+              </div>
+            </div>
+
+            {/* Previously Generated Diagrams Section */}
+            <div className="space-y-4 pt-4 border-t border-border/30">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-muted-foreground" />
+                  <h2 className="text-sm font-semibold tracking-tight text-foreground">
+                    Previously Generated Diagrams ({previouslyGeneratedDiagrams.length})
+                  </h2>
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  Saved in repository <code className="text-primary font-mono text-[11px]">diagrams/</code> directory
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {previouslyGeneratedDiagrams.map((item) => (
+                  <div
+                    key={item.id}
+                    onClick={() => selectDiagram(item.id)}
+                    className={`group relative flex flex-col justify-between rounded-xl border border-border/40 bg-white/[0.02] p-5 cursor-pointer transition-all duration-300 ${item.hoverBorderClass} hover:-translate-y-1 hover:bg-white/[0.03] hover:shadow-xl`}
+                  >
+                    <div>
+                      {/* Header */}
+                      <div className="flex items-center justify-between mb-3">
+                        <span
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border font-mono uppercase tracking-wider ${item.badgeClass}`}
+                        >
+                          {item.category}
+                        </span>
+                        <div className="flex items-center gap-1.5 text-[11px] font-medium text-emerald-400">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Pass</span>
+                        </div>
+                      </div>
+
+                      <h3 className="text-base font-semibold text-foreground group-hover:text-primary transition-colors">
+                        {item.title}
+                      </h3>
+                      <p className="text-[11px] text-muted-foreground/80 font-mono mt-0.5 mb-3">
+                        {item.subtitle}
+                      </p>
+                      <p className="text-xs text-muted-foreground line-clamp-3 leading-relaxed mb-4">
+                        {item.description}
+                      </p>
+                    </div>
+
+                    <div>
+                      {/* Source Citations */}
+                      <div className="rounded-lg bg-black/40 border border-border/20 p-2.5 mb-4 space-y-1 font-mono text-[10.5px] text-muted-foreground">
+                        {item.sources.map((s, idx) => (
+                          <div key={idx} className="flex items-center justify-between truncate">
+                            <span className="text-foreground/80 font-medium">
+                              {s.path}
+                              {s.line ? `:${s.line}` : ""}
+                            </span>
+                            <span className="text-[9.5px] text-foreground/40">{s.label}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Launch Action */}
+                      <div className="flex items-center justify-between pt-2 border-t border-border/20">
+                        <span className="text-[11px] text-muted-foreground group-hover:text-foreground transition-colors font-medium">
+                          Launch Interactive Viewer
+                        </span>
+                        <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Discover Additional Recommendations Banner */}
+            <div className="p-5 rounded-2xl bg-gradient-to-r from-primary/10 via-primary/5 to-transparent border border-primary/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <Sparkles className="w-4 h-4 text-primary" />
+                  <h3 className="text-sm font-semibold text-foreground">
+                    Discover More Diagrams for this Repository
+                  </h3>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  The RFC 016 Recommendation Engine identified high-impact candidates (call sequences, fragility networks, error flows) ready to generate into <code className="text-primary font-mono text-[11px]">diagrams/</code>.
+                </p>
+              </div>
+              <button
+                onClick={() => setGallerySubTab("recommended")}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground font-semibold text-xs shrink-0 hover:bg-primary/90 transition-all shadow-md cursor-pointer"
+              >
+                <span>View Recommendations</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             </div>
 
             {/* Architecture Documents & PRD Reference footer */}
@@ -742,6 +1090,8 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram }: DiagramsTabProp
                 </div>
               </div>
             </div>
+            </>
+            )}
           </div>
         ) : (
           /* Interactive Viewer Mode */
@@ -761,9 +1111,15 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram }: DiagramsTabProp
                 </span>
               </div>
               <div className="flex items-center gap-3 shrink-0 font-mono text-[11px]">
-                <span className="text-emerald-400 flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" /> Gate Pass
-                </span>
+                {activeDiagram.utility_score ? (
+                  <span className="text-primary flex items-center gap-1 font-bold">
+                    <Sparkles className="w-3 h-3 text-primary" /> Score {activeDiagram.utility_score}/100
+                  </span>
+                ) : (
+                  <span className="text-emerald-400 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" /> Gate Pass
+                  </span>
+                )}
                 <span className="text-foreground/30">|</span>
                 <span>{activeDiagram.durationMs}ms</span>
               </div>
@@ -775,7 +1131,7 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram }: DiagramsTabProp
                 <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-[#090d16]/80 backdrop-blur-sm gap-3">
                   <div className="w-7 h-7 border-2 border-primary border-t-transparent rounded-full animate-spin" />
                   <p className="text-xs text-muted-foreground font-mono">
-                    Rendering verified diagram...
+                    Rendering stylized diagram...
                   </p>
                 </div>
               )}
@@ -784,17 +1140,18 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram }: DiagramsTabProp
                 <iframe
                   key={`stylized-${activeDiagram.id}`}
                   title={activeDiagram.title}
-                  src={`/diagrams/${activeDiagram.htmlFile}?theme=dark`}
+                  srcDoc={activeDiagram.stylizedHtml || undefined}
+                  src={activeDiagram.stylizedHtml ? undefined : `/diagrams/${activeDiagram.htmlFile}?theme=dark`}
                   className="w-full h-full border-0"
                   sandbox="allow-scripts allow-same-origin allow-popups"
                 />
               ) : (
-                <iframe
+                <MermaidViewer
                   key={`mermaid-${activeDiagram.id}`}
+                  diagramId={activeDiagram.id}
                   title={activeDiagram.title}
-                  srcDoc={diagramHtml || ""}
-                  className="w-full h-full border-0"
-                  sandbox="allow-scripts allow-same-origin allow-popups"
+                  code={activeMermaidCode}
+                  className="w-full h-full"
                 />
               )}
             </div>

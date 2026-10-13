@@ -1,0 +1,4 @@
+graph TD
+    Client["Client Interface (CLI / UI / Agents)"] --> Protocol["MCP & IPC Protocol Daemon"]
+    Protocol --> Pipeline["Multi-Pass AST Worker Pool"]
+    Pipeline --> Store[("SQLite WAL Store")]
