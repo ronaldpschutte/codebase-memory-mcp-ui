@@ -468,6 +468,17 @@ function generateStandaloneMermaidHtml(title: string, mermaidCode: string): stri
   ].join('\n');
 }
 
+export function getDiagramHtmlUrl(htmlFile?: string): string {
+  if (!htmlFile) return "/docs/diagrams/system-overview.html?theme=dark";
+  if (htmlFile.startsWith("/") || htmlFile.startsWith("http")) {
+    return htmlFile.includes("?") ? htmlFile : `${htmlFile}?theme=dark`;
+  }
+  if (htmlFile.startsWith("docs/")) {
+    return `/${htmlFile}?theme=dark`;
+  }
+  return `/docs/diagrams/${htmlFile}?theme=dark`;
+}
+
 interface DiagramsTabProps {
   initialDiagram?: string | null;
   onSelectDiagram?: (diagramId: string | null) => void;
@@ -562,35 +573,46 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }
     return DIAGRAMS[0];
   }, [repoCatalog]);
 
-  // Previously generated diagrams list
+  // Previously generated diagrams list (baseline verified suite + project-generated diagrams)
   const previouslyGeneratedDiagrams: DiagramItem[] = useMemo(() => {
+    // Start with all verified diagrams (excluding the primary system overview item)
+    const list: DiagramItem[] = DIAGRAMS.slice(1).map((item) => {
+      const match = repoCatalog?.generated_diagrams?.find((d: any) => d.id === item.id);
+      return match ? { ...item, ...match } : item;
+    });
+
+    // Merge in any additional repository-generated diagrams from catalog
     if (repoCatalog?.generated_diagrams && Array.isArray(repoCatalog.generated_diagrams)) {
-      const fromCatalog = repoCatalog.generated_diagrams
-        .filter((d: any) => d.id !== systemOverviewDiagram.id && d.id !== DIAGRAMS[0].id)
-        .map((d: any) => {
-          const matchExisting = DIAGRAMS.find((ex) => ex.id === d.id);
-          return {
-            ...(matchExisting || {}),
+      repoCatalog.generated_diagrams
+        .filter(
+          (d: any) =>
+            d.id !== systemOverviewDiagram.id &&
+            d.id !== DIAGRAMS[0].id &&
+            !list.some((item) => item.id === d.id)
+        )
+        .forEach((d: any) => {
+          list.push({
             ...d,
-            subtitle: d.subtitle || matchExisting?.subtitle || "",
-            description: d.description || matchExisting?.description || "",
-            badgeClass: d.badgeClass || matchExisting?.badgeClass || "bg-cyan-500/15 text-cyan-400 border-cyan-500/30",
-            hoverBorderClass: d.hoverBorderClass || matchExisting?.hoverBorderClass || "hover:border-cyan-500/50 hover:shadow-cyan-500/10",
-            sources: d.sources || matchExisting?.sources || [{ path: "src/main.c", line: 1, label: d.title }],
+            subtitle: d.subtitle || "",
+            description: d.description || "",
+            badgeClass: d.badgeClass || "bg-cyan-500/15 text-cyan-400 border-cyan-500/30",
+            hoverBorderClass:
+              d.hoverBorderClass || "hover:border-cyan-500/50 hover:shadow-cyan-500/10",
+            sources: d.sources || [{ path: "src/main.c", line: 1, label: d.title }],
             htmlFile: d.htmlFile || `${d.id}.html`,
             specFile: d.specFile || `specs/${d.id}.json`,
             durationMs: d.durationMs || 5,
-          };
+          });
         });
-      if (fromCatalog.length > 0) return fromCatalog;
     }
-    // Baseline: the remaining verified diagrams in the repository
-    return DIAGRAMS.slice(1);
+
+    return list;
   }, [repoCatalog, systemOverviewDiagram.id]);
 
   const allDiagrams = useMemo(() => {
-    const list: DiagramItem[] = [DIAGRAMS[0]];
-    if (systemOverviewDiagram.id !== DIAGRAMS[0].id) {
+    // Baseline: ALWAYS start with all verified diagrams so every top tab is resolvable
+    const list: DiagramItem[] = [...DIAGRAMS];
+    if (systemOverviewDiagram.id && !list.some((item) => item.id === systemOverviewDiagram.id)) {
       list.push(systemOverviewDiagram);
     }
     previouslyGeneratedDiagrams.forEach((d) => {
@@ -661,7 +683,7 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }
         const url = URL.createObjectURL(blob);
         window.open(url, "_blank");
       } else {
-        window.open(`/diagrams/${activeDiagram.htmlFile}?theme=dark`, "_blank");
+        window.open(getDiagramHtmlUrl(activeDiagram.htmlFile), "_blank");
       }
     } else {
       const standaloneHtml = generateStandaloneMermaidHtml(activeDiagram.title, activeMermaidCode);
@@ -1141,7 +1163,11 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }
                   key={`stylized-${activeDiagram.id}`}
                   title={activeDiagram.title}
                   srcDoc={activeDiagram.stylizedHtml || undefined}
-                  src={activeDiagram.stylizedHtml ? undefined : `/diagrams/${activeDiagram.htmlFile}?theme=dark`}
+                  src={
+                    activeDiagram.stylizedHtml
+                      ? undefined
+                      : getDiagramHtmlUrl(activeDiagram.htmlFile)
+                  }
                   className="w-full h-full border-0"
                   sandbox="allow-scripts allow-same-origin allow-popups"
                 />
