@@ -1,10 +1,10 @@
 {
-  "report_id": "cbm-report-C-AI-Source-codebase-memory-mcp-ui-2026-10-13T17-01-21-591Z",
+  "report_id": "cbm-report-C-AI-Source-codebase-memory-mcp-ui-2026-10-13T17-19-19-402Z",
   "project": "C-AI-Source-codebase-memory-mcp-ui",
   "git_branch": "RFC_017",
-  "commit_hash": "4303f82",
-  "created_at": "2026-10-13T17:04:23.177Z",
-  "execution_time_ms": 186331,
+  "commit_hash": "a11bb15",
+  "created_at": "2026-10-13T17:22:20.959Z",
+  "execution_time_ms": 186067,
   "preset": "comprehensive",
   "scores": {
     "overall": 78,
@@ -680,7 +680,7 @@
     },
     "ai_readiness": {
       "project": "C-AI-Source-codebase-memory-mcp-ui",
-      "timestamp": "2026-10-13T17:04:23.174Z",
+      "timestamp": "2026-10-13T17:22:20.958Z",
       "score": 73,
       "grade": "B",
       "summary": "Moderate AI readiness: Good structural foundations, but lacks critical skill runbooks or test guardrails.",
