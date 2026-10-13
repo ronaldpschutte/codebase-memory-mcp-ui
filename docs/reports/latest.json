@@ -1,0 +1,748 @@
+{
+  "report_id": "cbm-report-C-AI-Source-codebase-memory-mcp-ui-2026-10-13T17-19-19-402Z",
+  "project": "C-AI-Source-codebase-memory-mcp-ui",
+  "git_branch": "RFC_017",
+  "commit_hash": "a11bb15",
+  "created_at": "2026-10-13T17:22:20.959Z",
+  "execution_time_ms": 186067,
+  "preset": "comprehensive",
+  "scores": {
+    "overall": 78,
+    "grade": "B+",
+    "test_coverage": 75,
+    "hygiene": 85,
+    "ai_readiness": 73
+  },
+  "fix_first": [
+    {
+      "rank": 1,
+      "symbol": "Missing root agent instructions (AGENTS.md / GEMINI.md)",
+      "file_path": "AGENTS.md",
+      "risk_score": 92,
+      "reasons": [
+        "AI Readiness Defect: instructions pillar",
+        "No project instructions found. AI agents will operate on generic assumptions rather than project conventions."
+      ],
+      "recommended_action": "Create an AGENTS.md or GEMINI.md in the root directory documenting architecture, build steps, and conventions."
+    },
+    {
+      "rank": 2,
+      "symbol": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.lib.i18n.useUiMessages",
+      "file_path": "graph-ui/src/lib/i18n.ts",
+      "risk_score": 88,
+      "reasons": [
+        "Untested critical entry point (inbound callers: 11)",
+        "Critical entry point (importance 33.17). Add dedicated test suite."
+      ],
+      "recommended_action": "Critical entry point (importance 33.17). Add dedicated test suite."
+    },
+    {
+      "rank": 3,
+      "symbol": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.lib.colors.colorForLabel",
+      "file_path": "graph-ui/src/lib/colors.ts",
+      "risk_score": 58,
+      "reasons": [
+        "Untested critical entry point (inbound callers: 6)",
+        "Critical entry point (importance 24.49). Add dedicated test suite."
+      ],
+      "recommended_action": "Critical entry point (importance 24.49). Add dedicated test suite."
+    },
+    {
+      "rank": 4,
+      "symbol": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.hooks.useGraphData.clampNodeBudget",
+      "file_path": "graph-ui/src/hooks/useGraphData.ts",
+      "risk_score": 40,
+      "reasons": [
+        "Untested critical entry point (inbound callers: 2)",
+        "Critical entry point (importance 14.14). Add dedicated test suite."
+      ],
+      "recommended_action": "Critical entry point (importance 14.14). Add dedicated test suite."
+    },
+    {
+      "rank": 5,
+      "symbol": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.components.GraphTab.GraphTab",
+      "file_path": "graph-ui/src/components/GraphTab.tsx",
+      "risk_score": 40,
+      "reasons": [
+        "Untested critical entry point (inbound callers: 2)",
+        "Critical entry point (importance 14.14). Add dedicated test suite."
+      ],
+      "recommended_action": "Critical entry point (importance 14.14). Add dedicated test suite."
+    },
+    {
+      "rank": 6,
+      "symbol": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.components.StatsTab.IndexProgress",
+      "file_path": "graph-ui/src/components/StatsTab.tsx",
+      "risk_score": 40,
+      "reasons": [
+        "Untested critical entry point (inbound callers: 1)",
+        "Critical entry point (importance 14.14). Add dedicated test suite."
+      ],
+      "recommended_action": "Critical entry point (importance 14.14). Add dedicated test suite."
+    },
+    {
+      "rank": 7,
+      "symbol": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.lib.colors.colorForStatus",
+      "file_path": "graph-ui/src/lib/colors.ts",
+      "risk_score": 40,
+      "reasons": [
+        "Untested critical entry point (inbound callers: 2)",
+        "Critical entry point (importance 14.14). Add dedicated test suite."
+      ],
+      "recommended_action": "Critical entry point (importance 14.14). Add dedicated test suite."
+    },
+    {
+      "rank": 8,
+      "symbol": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.components.EdgeLines.EdgeLines",
+      "file_path": "graph-ui/src/components/EdgeLines.tsx",
+      "risk_score": 40,
+      "reasons": [
+        "Untested critical entry point (inbound callers: 1)",
+        "Critical entry point (importance 10.00). Add dedicated test suite."
+      ],
+      "recommended_action": "Critical entry point (importance 10.00). Add dedicated test suite."
+    },
+    {
+      "rank": 9,
+      "symbol": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.hooks.useGraphData.fetchLayout",
+      "file_path": "graph-ui/src/hooks/useGraphData.ts",
+      "risk_score": 40,
+      "reasons": [
+        "Untested critical entry point (inbound callers: 1)",
+        "Critical entry point (importance 10.00). Add dedicated test suite."
+      ],
+      "recommended_action": "Critical entry point (importance 10.00). Add dedicated test suite."
+    },
+    {
+      "rank": 10,
+      "symbol": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.hooks.useGraphData.useGraphData",
+      "file_path": "graph-ui/src/hooks/useGraphData.ts",
+      "risk_score": 40,
+      "reasons": [
+        "Untested critical entry point (inbound callers: 1)",
+        "Critical entry point (importance 10.00). Add dedicated test suite."
+      ],
+      "recommended_action": "Critical entry point (importance 10.00). Add dedicated test suite."
+    }
+  ],
+  "sections": {
+    "test_coverage": {
+      "project": "C-AI-Source-codebase-memory-mcp-ui",
+      "mode": "gaps",
+      "summary": {
+        "total_production_functions": 9523,
+        "tested_production_functions": 1468,
+        "untested_entry_points": 42,
+        "untested_critical_functions": 7240
+      },
+      "critical_untested_symbols": [
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.lib.i18n.useUiMessages",
+          "file_path": "graph-ui/src/lib/i18n.ts",
+          "line": 201,
+          "importance": 33.166248,
+          "is_entry_point": true,
+          "inbound_callers_count": 11,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 33.17). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.lib.colors.colorForLabel",
+          "file_path": "graph-ui/src/lib/colors.ts",
+          "line": 19,
+          "importance": 24.494897,
+          "is_entry_point": true,
+          "inbound_callers_count": 6,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 24.49). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.hooks.useGraphData.clampNodeBudget",
+          "file_path": "graph-ui/src/hooks/useGraphData.ts",
+          "line": 30,
+          "importance": 14.142136,
+          "is_entry_point": true,
+          "inbound_callers_count": 2,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 14.14). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.components.GraphTab.GraphTab",
+          "file_path": "graph-ui/src/components/GraphTab.tsx",
+          "line": 67,
+          "importance": 14.142136,
+          "is_entry_point": true,
+          "inbound_callers_count": 2,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 14.14). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.components.StatsTab.IndexProgress",
+          "file_path": "graph-ui/src/components/StatsTab.tsx",
+          "line": 430,
+          "importance": 14.142136,
+          "is_entry_point": true,
+          "inbound_callers_count": 1,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 14.14). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.lib.colors.colorForStatus",
+          "file_path": "graph-ui/src/lib/colors.ts",
+          "line": 42,
+          "importance": 14.142136,
+          "is_entry_point": true,
+          "inbound_callers_count": 2,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 14.14). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.components.EdgeLines.EdgeLines",
+          "file_path": "graph-ui/src/components/EdgeLines.tsx",
+          "line": 54,
+          "importance": 10,
+          "is_entry_point": true,
+          "inbound_callers_count": 1,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 10.00). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.hooks.useGraphData.fetchLayout",
+          "file_path": "graph-ui/src/hooks/useGraphData.ts",
+          "line": 43,
+          "importance": 10,
+          "is_entry_point": true,
+          "inbound_callers_count": 1,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 10.00). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.hooks.useGraphData.useGraphData",
+          "file_path": "graph-ui/src/hooks/useGraphData.ts",
+          "line": 89,
+          "importance": 10,
+          "is_entry_point": true,
+          "inbound_callers_count": 1,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 10.00). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.hooks.useProjects.useProjects",
+          "file_path": "graph-ui/src/hooks/useProjects.ts",
+          "line": 81,
+          "importance": 10,
+          "is_entry_point": true,
+          "inbound_callers_count": 1,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 10.00). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.components.NodeTooltip.NodeTooltip",
+          "file_path": "graph-ui/src/components/NodeTooltip.tsx",
+          "line": 16,
+          "importance": 10,
+          "is_entry_point": true,
+          "inbound_callers_count": 1,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 10.00). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.components.DiagramsTab.DiagramsTab",
+          "file_path": "graph-ui/src/components/DiagramsTab.tsx",
+          "line": 147,
+          "importance": 10,
+          "is_entry_point": true,
+          "inbound_callers_count": 1,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 10.00). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.components.NodeCloud.NodeCloud",
+          "file_path": "graph-ui/src/components/NodeCloud.tsx",
+          "line": 233,
+          "importance": 10,
+          "is_entry_point": true,
+          "inbound_callers_count": 1,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 10.00). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.components.GraphTab.formatGraphLimitNotice",
+          "file_path": "graph-ui/src/components/GraphTab.tsx",
+          "line": 62,
+          "importance": 10,
+          "is_entry_point": true,
+          "inbound_callers_count": 1,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 10.00). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.components.FilterPanel.FilterPanel",
+          "file_path": "graph-ui/src/components/FilterPanel.tsx",
+          "line": 65,
+          "importance": 10,
+          "is_entry_point": true,
+          "inbound_callers_count": 1,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 10.00). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.components.ControlTab.ControlTab",
+          "file_path": "graph-ui/src/components/ControlTab.tsx",
+          "line": 129,
+          "importance": 10,
+          "is_entry_point": true,
+          "inbound_callers_count": 1,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 10.00). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.components.NodeDetailPanel.NodeDetailPanel",
+          "file_path": "graph-ui/src/components/NodeDetailPanel.tsx",
+          "line": 48,
+          "importance": 10,
+          "is_entry_point": true,
+          "inbound_callers_count": 1,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 10.00). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.components.GraphScene.GraphScene",
+          "file_path": "graph-ui/src/components/GraphScene.tsx",
+          "line": 131,
+          "importance": 10,
+          "is_entry_point": true,
+          "inbound_callers_count": 1,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 10.00). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.components.GraphScene.computeCameraTarget",
+          "file_path": "graph-ui/src/components/GraphScene.tsx",
+          "line": 285,
+          "importance": 10,
+          "is_entry_point": true,
+          "inbound_callers_count": 1,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 10.00). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.lib.i18n.detectLanguage",
+          "file_path": "graph-ui/src/lib/i18n.ts",
+          "line": 154,
+          "importance": 10,
+          "is_entry_point": true,
+          "inbound_callers_count": 1,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 10.00). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.components.MissedCallout.MissedCallout",
+          "file_path": "graph-ui/src/components/MissedCallout.tsx",
+          "line": 64,
+          "importance": 10,
+          "is_entry_point": true,
+          "inbound_callers_count": 1,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 10.00). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.lib.density.edgeIntensityScale",
+          "file_path": "graph-ui/src/lib/density.ts",
+          "line": 17,
+          "importance": 10,
+          "is_entry_point": true,
+          "inbound_callers_count": 1,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 10.00). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.lib.density.bloomIntensityScale",
+          "file_path": "graph-ui/src/lib/density.ts",
+          "line": 41,
+          "importance": 10,
+          "is_entry_point": true,
+          "inbound_callers_count": 1,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 10.00). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.lib.density.nodeBoostScale",
+          "file_path": "graph-ui/src/lib/density.ts",
+          "line": 48,
+          "importance": 10,
+          "is_entry_point": true,
+          "inbound_callers_count": 1,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 10.00). Add dedicated test suite."
+        },
+        {
+          "qualified_name": "C-AI-Source-codebase-memory-mcp-ui.graph-ui.src.lib.density.nodeGlowBoost",
+          "file_path": "graph-ui/src/lib/density.ts",
+          "line": 67,
+          "importance": 10,
+          "is_entry_point": true,
+          "inbound_callers_count": 1,
+          "public_route_exposure": false,
+          "recommendation": "Critical entry point (importance 10.00). Add dedicated test suite."
+        }
+      ]
+    },
+    "code_clones": {
+      "project": "C-AI-Source-codebase-memory-mcp-ui",
+      "total_clones_indexed": 18732,
+      "top_clone_clusters": [
+        {
+          "cluster_id": 1,
+          "representative_symbol": "C-AI-Source-codebase-memory-mcp-ui.tests.test_c_lsp.clsp_audit_heavycpp_policy_based_design",
+          "instance_count": 21,
+          "files_involved": [
+            "tests/test_c_lsp.c"
+          ],
+          "average_similarity": 0.8,
+          "description": "Duplicate logic cluster around C-AI-Source-codebase-memory-mcp-ui.tests.test_c_lsp.clsp_audit_heavycpp_policy_based_design across 1 files (avg similarity 0.80)."
+        },
+        {
+          "cluster_id": 2,
+          "representative_symbol": "C-AI-Source-codebase-memory-mcp-ui.tests.test_edge_imports.ei_csharp_basic_using",
+          "instance_count": 21,
+          "files_involved": [
+            "tests/test_edge_imports.c",
+            "tests/test_edge_structural.c",
+            "tests/test_edge_types_probe.c",
+            "tests/test_grammar_probe_c.c",
+            "tests/test_grammar_probe_d.c",
+            "tests/test_grammar_probe_f.c",
+            "tests/test_grammar_probe_g.c"
+          ],
+          "average_similarity": 0.8,
+          "description": "Duplicate logic cluster around C-AI-Source-codebase-memory-mcp-ui.tests.test_edge_imports.ei_csharp_basic_using across 7 files (avg similarity 0.80)."
+        },
+        {
+          "cluster_id": 3,
+          "representative_symbol": "C-AI-Source-codebase-memory-mcp-ui.tests.test_edge_imports.ei_csharp_subnamespace_using",
+          "instance_count": 21,
+          "files_involved": [
+            "tests/test_edge_imports.c",
+            "tests/test_edge_structural.c",
+            "tests/test_edge_types_probe.c",
+            "tests/test_grammar_probe_c.c",
+            "tests/test_grammar_probe_f.c",
+            "tests/test_grammar_probe_g.c"
+          ],
+          "average_similarity": 0.8,
+          "description": "Duplicate logic cluster around C-AI-Source-codebase-memory-mcp-ui.tests.test_edge_imports.ei_csharp_subnamespace_using across 6 files (avg similarity 0.80)."
+        },
+        {
+          "cluster_id": 4,
+          "representative_symbol": "C-AI-Source-codebase-memory-mcp-ui.tests.test_edge_imports.ei_php_aliased_use",
+          "instance_count": 21,
+          "files_involved": [
+            "tests/test_edge_imports.c",
+            "tests/test_grammar_probe_d.c",
+            "tests/test_lsp_resolution_probe.c",
+            "tests/test_matrix_new_constructs.c",
+            "tests/test_node_creation_probe.c",
+            "tests/test_php_lsp.c"
+          ],
+          "average_similarity": 0.8,
+          "description": "Duplicate logic cluster around C-AI-Source-codebase-memory-mcp-ui.tests.test_edge_imports.ei_php_aliased_use across 6 files (avg similarity 0.80)."
+        },
+        {
+          "cluster_id": 5,
+          "representative_symbol": "C-AI-Source-codebase-memory-mcp-ui.tests.repro.repro_grammar_markup.repro_grammar_markup_bibtex",
+          "instance_count": 20,
+          "files_involved": [
+            "tests/repro/repro_grammar_markup.c",
+            "tests/repro/repro_grammar_scientific.c",
+            "tests/repro/repro_grammar_systems.c",
+            "tests/repro/repro_grammar_web.c"
+          ],
+          "average_similarity": 0.8,
+          "description": "Duplicate logic cluster around C-AI-Source-codebase-memory-mcp-ui.tests.repro.repro_grammar_markup.repro_grammar_markup_bibtex across 4 files (avg similarity 0.80)."
+        },
+        {
+          "cluster_id": 6,
+          "representative_symbol": "C-AI-Source-codebase-memory-mcp-ui.tests.test_grammar_probe_a.probe_awk_no_type_nodes",
+          "instance_count": 20,
+          "files_involved": [
+            "tests/test_grammar_probe_a.c",
+            "tests/test_grammar_probe_d.c",
+            "tests/test_grammar_probe_e.c"
+          ],
+          "average_similarity": 0.8,
+          "description": "Duplicate logic cluster around C-AI-Source-codebase-memory-mcp-ui.tests.test_grammar_probe_a.probe_awk_no_type_nodes across 3 files (avg similarity 0.80)."
+        },
+        {
+          "cluster_id": 7,
+          "representative_symbol": "C-AI-Source-codebase-memory-mcp-ui.tests.repro.repro_grammar_functional.repro_grammar_functional_clojure",
+          "instance_count": 20,
+          "files_involved": [
+            "tests/repro/repro_grammar_functional.c",
+            "tests/repro/repro_grammar_markup.c",
+            "tests/repro/repro_grammar_scientific.c",
+            "tests/repro/repro_grammar_systems.c"
+          ],
+          "average_similarity": 0.8,
+          "description": "Duplicate logic cluster around C-AI-Source-codebase-memory-mcp-ui.tests.repro.repro_grammar_functional.repro_grammar_functional_clojure across 4 files (avg similarity 0.80)."
+        },
+        {
+          "cluster_id": 8,
+          "representative_symbol": "C-AI-Source-codebase-memory-mcp-ui.tests.test_edge_imports.ei_go_same_module_import",
+          "instance_count": 20,
+          "files_involved": [
+            "tests/test_edge_imports.c",
+            "tests/test_edge_structural.c",
+            "tests/test_edge_types_probe.c",
+            "tests/test_grammar_probe_c.c",
+            "tests/test_grammar_probe_f.c",
+            "tests/test_grammar_probe_g.c"
+          ],
+          "average_similarity": 0.8,
+          "description": "Duplicate logic cluster around C-AI-Source-codebase-memory-mcp-ui.tests.test_edge_imports.ei_go_same_module_import across 6 files (avg similarity 0.80)."
+        },
+        {
+          "cluster_id": 9,
+          "representative_symbol": "C-AI-Source-codebase-memory-mcp-ui.tests.test_edge_imports.ei_csharp_using_static",
+          "instance_count": 20,
+          "files_involved": [
+            "tests/test_edge_imports.c",
+            "tests/test_incremental.c"
+          ],
+          "average_similarity": 0.8,
+          "description": "Duplicate logic cluster around C-AI-Source-codebase-memory-mcp-ui.tests.test_edge_imports.ei_csharp_using_static across 2 files (avg similarity 0.80)."
+        },
+        {
+          "cluster_id": 10,
+          "representative_symbol": "C-AI-Source-codebase-memory-mcp-ui.tests.test_php_lsp.phplsp_at_return_static_covariant",
+          "instance_count": 19,
+          "files_involved": [
+            "tests/test_php_lsp.c"
+          ],
+          "average_similarity": 0.8,
+          "description": "Duplicate logic cluster around C-AI-Source-codebase-memory-mcp-ui.tests.test_php_lsp.phplsp_at_return_static_covariant across 1 files (avg similarity 0.80)."
+        },
+        {
+          "cluster_id": 11,
+          "representative_symbol": "C-AI-Source-codebase-memory-mcp-ui.tests.test_edge_imports.ei_typescript_re_export",
+          "instance_count": 19,
+          "files_involved": [
+            "tests/test_edge_imports.c",
+            "tests/test_edge_structural.c",
+            "tests/test_edge_types_probe.c",
+            "tests/test_grammar_probe_c.c",
+            "tests/test_grammar_probe_d.c",
+            "tests/test_grammar_probe_f.c",
+            "tests/test_grammar_probe_g.c"
+          ],
+          "average_similarity": 0.8,
+          "description": "Duplicate logic cluster around C-AI-Source-codebase-memory-mcp-ui.tests.test_edge_imports.ei_typescript_re_export across 7 files (avg similarity 0.80)."
+        },
+        {
+          "cluster_id": 12,
+          "representative_symbol": "C-AI-Source-codebase-memory-mcp-ui.tests.test_edge_imports.ei_rust_trait_use",
+          "instance_count": 19,
+          "files_involved": [
+            "tests/test_edge_imports.c",
+            "tests/test_edge_structural.c",
+            "tests/test_edge_types_probe.c",
+            "tests/test_grammar_probe_c.c",
+            "tests/test_grammar_probe_d.c",
+            "tests/test_grammar_probe_f.c",
+            "tests/test_grammar_probe_g.c"
+          ],
+          "average_similarity": 0.8,
+          "description": "Duplicate logic cluster around C-AI-Source-codebase-memory-mcp-ui.tests.test_edge_imports.ei_rust_trait_use across 7 files (avg similarity 0.80)."
+        },
+        {
+          "cluster_id": 13,
+          "representative_symbol": "C-AI-Source-codebase-memory-mcp-ui.tests.test_c_lsp.clsp_cpp17_ctadvector",
+          "instance_count": 18,
+          "files_involved": [
+            "tests/test_c_lsp.c"
+          ],
+          "average_similarity": 0.8,
+          "description": "Duplicate logic cluster around C-AI-Source-codebase-memory-mcp-ui.tests.test_c_lsp.clsp_cpp17_ctadvector across 1 files (avg similarity 0.80)."
+        },
+        {
+          "cluster_id": 14,
+          "representative_symbol": "C-AI-Source-codebase-memory-mcp-ui.tests.test_edge_types_probe.async_calls_kafkajs_ts",
+          "instance_count": 18,
+          "files_involved": [
+            "tests/test_edge_types_probe.c",
+            "tests/test_grammar_probe_c.c",
+            "tests/test_grammar_probe_f.c",
+            "tests/test_lang_contract.c",
+            "tests/test_matrix_new_constructs.c"
+          ],
+          "average_similarity": 0.8,
+          "description": "Duplicate logic cluster around C-AI-Source-codebase-memory-mcp-ui.tests.test_edge_types_probe.async_calls_kafkajs_ts across 5 files (avg similarity 0.80)."
+        },
+        {
+          "cluster_id": 15,
+          "representative_symbol": "C-AI-Source-codebase-memory-mcp-ui.tests.repro.repro_grammar_markup.repro_grammar_markup_liquid",
+          "instance_count": 18,
+          "files_involved": [
+            "tests/repro/repro_grammar_markup.c",
+            "tests/repro/repro_grammar_scientific.c",
+            "tests/repro/repro_grammar_misc.c",
+            "tests/repro/repro_grammar_web.c",
+            "tests/repro/repro_grammar_shells.c"
+          ],
+          "average_similarity": 0.8,
+          "description": "Duplicate logic cluster around C-AI-Source-codebase-memory-mcp-ui.tests.repro.repro_grammar_markup.repro_grammar_markup_liquid across 5 files (avg similarity 0.80)."
+        },
+        {
+          "cluster_id": 16,
+          "representative_symbol": "C-AI-Source-codebase-memory-mcp-ui.tests.test_c_lsp.clsp_cpp17_class_template_deduction",
+          "instance_count": 16,
+          "files_involved": [
+            "tests/test_c_lsp.c"
+          ],
+          "average_similarity": 0.8,
+          "description": "Duplicate logic cluster around C-AI-Source-codebase-memory-mcp-ui.tests.test_c_lsp.clsp_cpp17_class_template_deduction across 1 files (avg similarity 0.80)."
+        },
+        {
+          "cluster_id": 17,
+          "representative_symbol": "C-AI-Source-codebase-memory-mcp-ui.tests.test_incremental.tool_qg_match_defines",
+          "instance_count": 16,
+          "files_involved": [
+            "tests/test_incremental.c"
+          ],
+          "average_similarity": 0.8,
+          "description": "Duplicate logic cluster around C-AI-Source-codebase-memory-mcp-ui.tests.test_incremental.tool_qg_match_defines across 1 files (avg similarity 0.80)."
+        },
+        {
+          "cluster_id": 18,
+          "representative_symbol": "C-AI-Source-codebase-memory-mcp-ui.tests.repro.repro_grammar_markup.repro_grammar_markup_rst",
+          "instance_count": 16,
+          "files_involved": [
+            "tests/repro/repro_grammar_markup.c",
+            "tests/repro/repro_grammar_misc.c",
+            "tests/repro/repro_grammar_scientific.c",
+            "tests/repro/repro_grammar_systems.c",
+            "tests/repro/repro_grammar_web.c",
+            "tests/repro/repro_grammar_shells.c"
+          ],
+          "average_similarity": 0.8,
+          "description": "Duplicate logic cluster around C-AI-Source-codebase-memory-mcp-ui.tests.repro.repro_grammar_markup.repro_grammar_markup_rst across 6 files (avg similarity 0.80)."
+        },
+        {
+          "cluster_id": 19,
+          "representative_symbol": "C-AI-Source-codebase-memory-mcp-ui.tests.test_py_lsp.pylsp_constructor_call_returns_instance",
+          "instance_count": 16,
+          "files_involved": [
+            "tests/test_py_lsp.c",
+            "tests/test_rust_lsp.c"
+          ],
+          "average_similarity": 0.8,
+          "description": "Duplicate logic cluster around C-AI-Source-codebase-memory-mcp-ui.tests.test_py_lsp.pylsp_constructor_call_returns_instance across 2 files (avg similarity 0.80)."
+        },
+        {
+          "cluster_id": 20,
+          "representative_symbol": "C-AI-Source-codebase-memory-mcp-ui.tests.test_grammar_probe_e.probe_capnp_import_edge",
+          "instance_count": 15,
+          "files_involved": [
+            "tests/test_grammar_probe_e.c",
+            "tests/test_registry.c",
+            "tests/test_ts_lsp.c",
+            "tests/test_grammar_probe_f.c"
+          ],
+          "average_similarity": 0.8,
+          "description": "Duplicate logic cluster around C-AI-Source-codebase-memory-mcp-ui.tests.test_grammar_probe_e.probe_capnp_import_edge across 4 files (avg similarity 0.80)."
+        }
+      ]
+    },
+    "dead_code": {
+      "error": "Timeout waiting for response to id 5",
+      "dead_symbols": [],
+      "count": 0
+    },
+    "blast_radius": {
+      "error": "Timeout waiting for response to id 6",
+      "high_impact_nodes": []
+    },
+    "coupled_files": {
+      "error": "Timeout waiting for response to id 7",
+      "coupled_pairs": []
+    },
+    "api_surface": {
+      "error": "Timeout waiting for response to id 8",
+      "endpoints": []
+    },
+    "error_flow": {
+      "error": "Timeout waiting for response to id 9",
+      "unhandled_flows": []
+    },
+    "env_vars": {
+      "error": "Timeout waiting for response to id 10",
+      "variables": []
+    },
+    "ai_readiness": {
+      "project": "C-AI-Source-codebase-memory-mcp-ui",
+      "timestamp": "2026-10-13T17:22:20.958Z",
+      "score": 73,
+      "grade": "B",
+      "summary": "Moderate AI readiness: Good structural foundations, but lacks critical skill runbooks or test guardrails.",
+      "pillars": {
+        "instructions": {
+          "score": 4,
+          "max": 20,
+          "status": "NEEDS_IMPROVEMENT",
+          "findings": [
+            "Found LLM summary index at docs/llms.txt."
+          ]
+        },
+        "skills": {
+          "score": 25,
+          "max": 25,
+          "status": "EXCELLENT",
+          "findings": [
+            "Detected 4 installed skill(s) in repository.",
+            "All installed skills have valid YAML frontmatter and triggers.",
+            "Detected 1 complex tool(s)/environment(s) in codebase."
+          ]
+        },
+        "graph_integrity": {
+          "score": 9,
+          "max": 20,
+          "status": "NEEDS_IMPROVEMENT",
+          "findings": [
+            "Found architecture documentation (PRD_NATIVE_DIAGRAM_GENERATION.md).",
+            "codebase-memory-mcp daemon not running during audit; estimated graph score."
+          ]
+        },
+        "test_guardrails": {
+          "score": 20,
+          "max": 20,
+          "status": "EXCELLENT",
+          "findings": [
+            "Found dedicated test suite directory 'tests'.",
+            "Linters and formatters configured: .clang-format, .clang-tidy",
+            "Continuous Integration (CI) configured via .github/workflows."
+          ]
+        },
+        "hygiene": {
+          "score": 15,
+          "max": 15,
+          "status": "EXCELLENT",
+          "findings": [
+            ".gitignore is present and configured.",
+            "Deterministic dependency lockfiles present.",
+            "Repository structure follows modular separation."
+          ]
+        }
+      },
+      "shortcomings": [
+        {
+          "id": "no-agent-instructions",
+          "severity": "BLOCKER",
+          "pillar": "instructions",
+          "title": "Missing root agent instructions (AGENTS.md / GEMINI.md)",
+          "description": "No project instructions found. AI agents will operate on generic assumptions rather than project conventions.",
+          "remediation": "Create an AGENTS.md or GEMINI.md in the root directory documenting architecture, build steps, and conventions."
+        }
+      ]
+    }
+  }
+}

@@ -170,6 +170,51 @@ describe("DiagramsTab", () => {
     expect(screen.getByText(/Saved in repository/i)).toBeInTheDocument();
     expect(screen.getByText("Launch Interactive System Overview")).toBeInTheDocument();
   });
+
+  it("retains all verified diagrams (including sequence_export) even when a custom repo catalog is loaded", async () => {
+    const mockCatalog = {
+      schema_version: 1,
+      system_overview: {
+        id: "system-overview",
+        title: "System Overview: Architecture & Subsystems",
+        category: "structural",
+        htmlFile: "system-overview.html",
+        specFile: "specs/system-overview.json",
+      },
+      generated_diagrams: [
+        {
+          id: "rec-fragility-co-change",
+          title: "Temporal Co-Change Fragility Network",
+          category: "quality",
+          htmlFile: "rec-fragility-co-change.html",
+          specFile: "specs/rec-fragility-co-change.json",
+        },
+      ],
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) => {
+        if (url.includes("catalog.json")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(mockCatalog),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({}),
+        });
+      })
+    );
+
+    render(<DiagramsTab initialDiagram="sequence_export" />);
+
+    // Should mount the viewer for Export Diagram Sequence directly without falling back to gallery
+    expect(await screen.findByTitle("Export Diagram Sequence")).toBeInTheDocument();
+    expect(screen.getByText("Open Standalone")).toBeInTheDocument();
+  });
 });
+
 
 

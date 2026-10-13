@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { ensureDocsLayout } from "./ensure-docs-layout.mjs";
 
 /**
  * Resolves the SQLite database path for a given project name.
@@ -1243,23 +1244,17 @@ function escapeHtml(str) {
 }
 
 /**
- * Checks target repository for diagrams directory; creates it if missing.
+ * Checks target repository for docs/diagrams directory; creates it if missing (RFC 017).
  */
 export function ensureRepoDiagramsDir(repoPath) {
   const root = repoPath ? path.resolve(repoPath) : process.cwd();
-  const diagramsDir = path.join(root, "diagrams");
-  const specsDir = path.join(diagramsDir, "specs");
-  if (!fs.existsSync(diagramsDir)) {
-    fs.mkdirSync(diagramsDir, { recursive: true });
-  }
-  if (!fs.existsSync(specsDir)) {
-    fs.mkdirSync(specsDir, { recursive: true });
-  }
-  return { diagramsDir, specsDir };
+  const layout = ensureDocsLayout(root, { migrate: true });
+  return { diagramsDir: layout.diagramsDir, specsDir: layout.specsDir };
 }
 
 /**
  * Loads the repository's diagrams catalog if present.
+ * Checks docs/diagrams/catalog.json first (RFC 017), then falls back to legacy diagrams/catalog.json.
  */
 export function loadRepoDiagramsCatalog(repoPath) {
   const { diagramsDir } = ensureRepoDiagramsDir(repoPath);
@@ -1271,9 +1266,21 @@ export function loadRepoDiagramsCatalog(repoPath) {
       // return default structure on corrupt/empty
     }
   }
+
+  // Fallback to legacy root diagrams/catalog.json if present
+  const root = repoPath ? path.resolve(repoPath) : process.cwd();
+  const legacyCatalogPath = path.join(root, "diagrams", "catalog.json");
+  if (fs.existsSync(legacyCatalogPath)) {
+    try {
+      return JSON.parse(fs.readFileSync(legacyCatalogPath, "utf8"));
+    } catch {
+      // return default structure on corrupt/empty
+    }
+  }
+
   return {
     schema_version: 1,
-    repo_path: repoPath ? path.resolve(repoPath) : process.cwd(),
+    repo_path: root,
     updated_at: new Date().toISOString(),
     system_overview: null,
     generated_diagrams: [],

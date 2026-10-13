@@ -51,7 +51,7 @@ Options:
   --project <name>         Target project name (defaults to repository directory name)
   --repo <path>            Path to repository root (defaults to cwd)
   --preset <preset>        Analysis preset: 'quick' or 'comprehensive' (default: 'comprehensive')
-  --save                   Save snapshot report to .codebase-memory/reports/
+  --save                   Save snapshot report to docs/reports/ (RFC 017)
   --format <format>        Output format: 'markdown', 'json', or 'summary' (default: 'markdown')
   --fail-under <score>     Exit with code 1 if overall health score drops below <score> (CI gate)
   --max-high-risk <num>    Exit with code 1 if high-risk items (score >= 80) exceed <num>

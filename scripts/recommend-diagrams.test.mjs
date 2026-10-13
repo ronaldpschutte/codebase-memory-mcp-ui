@@ -97,6 +97,7 @@ describe("recommend_engine", () => {
 
       // Run post-index System Overview
       const { diagramsDir, systemOverview, catalog } = runPostIndexSystemOverview(tmpDir, "test-tmp-proj");
+      assert.equal(diagramsDir, path.join(tmpDir, "docs", "diagrams"));
       assert.ok(fs.existsSync(diagramsDir));
       assert.ok(fs.existsSync(path.join(diagramsDir, "specs")));
       assert.ok(fs.existsSync(path.join(diagramsDir, "system-overview.mermaid")));
