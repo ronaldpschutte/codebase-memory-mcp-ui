@@ -531,10 +531,10 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }
 
   const [repoCatalog, setRepoCatalog] = useState<any>(null);
 
-  // Fetch repository diagrams catalog (diagrams/catalog.json) if present
+  // Fetch repository diagrams catalog (docs/diagrams/catalog.json or diagrams/catalog.json) if present
   useEffect(() => {
-    fetch("/diagrams/catalog.json")
-      .then((res) => (res.ok ? res.json() : null))
+    fetch("/docs/diagrams/catalog.json")
+      .then((res) => (res.ok ? res.json() : fetch("/diagrams/catalog.json").then((r) => (r.ok ? r.json() : null))))
       .then((catalog) => {
         if (catalog && (catalog.generated_diagrams || catalog.system_overview)) {
           setRepoCatalog(catalog);
@@ -630,11 +630,11 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }
           : JSON.stringify(activeDiagram.spec, null, 2)
       );
     } else if (activeDiagram.specFile) {
-      fetch(`/diagrams/${activeDiagram.specFile}`)
-        .then((res) => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          return res.json();
-        })
+      fetch(`/docs/diagrams/${activeDiagram.specFile}`)
+        .then((res) => (res.ok ? res.json() : fetch(`/diagrams/${activeDiagram.specFile}`).then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        })))
         .then((data) => {
           setSpecContent(JSON.stringify(data, null, 2));
         })
@@ -971,7 +971,7 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }
                   </h2>
                 </div>
                 <span className="text-xs text-muted-foreground">
-                  Saved in repository <code className="text-primary font-mono text-[11px]">diagrams/</code> directory
+                  Saved in repository <code className="text-primary font-mono text-[11px]">docs/diagrams/</code> directory
                 </span>
               </div>
 
@@ -1044,7 +1044,7 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }
                   </h3>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  The RFC 016 Recommendation Engine identified high-impact candidates (call sequences, fragility networks, error flows) ready to generate into <code className="text-primary font-mono text-[11px]">diagrams/</code>.
+                  The RFC 016 Recommendation Engine identified high-impact candidates (call sequences, fragility networks, error flows) ready to generate into <code className="text-primary font-mono text-[11px]">docs/diagrams/</code>.
                 </p>
               </div>
               <button

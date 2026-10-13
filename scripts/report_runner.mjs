@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execSync, spawn } from "node:child_process";
 import { runAIReadinessAudit } from "./audit_engine.mjs";
+import { ensureDocsLayout } from "./ensure-docs-layout.mjs";
 
 /**
  * Discovers the codebase-memory-mcp executable path.
@@ -603,15 +604,13 @@ export async function runRepositoryAnalysisReport(options = {}) {
 }
 
 /**
- * Saves report to .codebase-memory/reports/<project>-<timestamp>.json and latest.json.
+ * Saves report to docs/reports/<project>-<timestamp>.json and latest.json (RFC 017).
+ * Also writes companion markdown files (<project>-<timestamp>.md and latest.md).
  */
 export function saveReportToFile(report, options = {}) {
   const repoPath = path.resolve(options.repoPath || process.cwd());
-  const reportsDir = path.join(repoPath, ".codebase-memory", "reports");
-  
-  if (!fs.existsSync(reportsDir)) {
-    fs.mkdirSync(reportsDir, { recursive: true });
-  }
+  const layout = ensureDocsLayout(repoPath, { migrate: true });
+  const reportsDir = layout.reportsDir;
 
   const safeTs = report.created_at.replace(/[:.]/g, "-");
   const filename = `${report.project}-${safeTs}.json`;
@@ -621,6 +620,15 @@ export function saveReportToFile(report, options = {}) {
   const jsonStr = JSON.stringify(report, null, 2);
   fs.writeFileSync(filePath, jsonStr, "utf-8");
   fs.writeFileSync(latestPath, jsonStr, "utf-8");
+
+  // Also write companion markdown snapshot
+  try {
+    const mdStr = renderReportMarkdown(report);
+    const mdPath = path.join(reportsDir, `${report.project}-${safeTs}.md`);
+    const latestMdPath = path.join(reportsDir, "latest.md");
+    fs.writeFileSync(mdPath, mdStr, "utf-8");
+    fs.writeFileSync(latestMdPath, mdStr, "utf-8");
+  } catch {}
 
   return filePath;
 }

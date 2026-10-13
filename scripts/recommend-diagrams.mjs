@@ -60,12 +60,12 @@ Usage: node scripts/recommend-diagrams.mjs [options]
 Options:
   --project <name>         Target project name (defaults to repository folder name)
   --repo-path <path>       Target repository path (defaults to current working directory)
-  --post-index             Run post-indexing hook: ensures diagrams/ dir, generates System Overview
+  --post-index             Run post-indexing hook: ensures docs/diagrams/ dir, generates System Overview (RFC 017)
   --limit <num>            Maximum number of recommendations to return (default: 6)
   --category <cat>         Filter by category: 'all', 'structural', 'behavioral', 'quality', 'dataflow'
   --min-score <score>      Minimum utility score threshold (0-100, default: 50)
   --format <format>        Output format: 'markdown', 'json', or 'summary' (default: 'markdown')
-  --generate               Generate Mermaid, Spec, and Stylized HTML files into repo diagrams/
+  --generate               Generate Mermaid, Spec, and Stylized HTML files into repo docs/diagrams/ (RFC 017)
   --out <file>             Write output to specified file
   --help, -h               Show this help message
 `);
