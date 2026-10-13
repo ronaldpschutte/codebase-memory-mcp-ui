@@ -99,12 +99,12 @@ describe("recommend_engine", () => {
       const { diagramsDir, systemOverview, catalog } = runPostIndexSystemOverview(tmpDir, "test-tmp-proj");
       assert.ok(fs.existsSync(diagramsDir));
       assert.ok(fs.existsSync(path.join(diagramsDir, "specs")));
-      assert.ok(fs.existsSync(path.join(diagramsDir, "architecture.mermaid")));
-      assert.ok(fs.existsSync(path.join(diagramsDir, "specs", "architecture.json")));
-      assert.ok(fs.existsSync(path.join(diagramsDir, "architecture.html")));
+      assert.ok(fs.existsSync(path.join(diagramsDir, "system-overview.mermaid")));
+      assert.ok(fs.existsSync(path.join(diagramsDir, "specs", "system-overview.json")));
+      assert.ok(fs.existsSync(path.join(diagramsDir, "system-overview.html")));
       assert.ok(fs.existsSync(path.join(diagramsDir, "catalog.json")));
 
-      assert.equal(systemOverview.id, "architecture");
+      assert.equal(systemOverview.id, "system-overview");
       assert.equal(systemOverview.is_system_overview, true);
       assert.ok(catalog.system_overview);
       assert.equal(catalog.generated_diagrams.length, 1);

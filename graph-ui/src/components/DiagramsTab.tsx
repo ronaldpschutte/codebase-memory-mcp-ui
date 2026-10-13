@@ -327,6 +327,10 @@ const REPO_MERMAID_DIAGRAMS: Record<string, string> = {
 };
 
 function generateMermaidHtml(title: string, mermaidCode: string): string {
+  const escapedMermaid = mermaidCode
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
   return [
     '<!DOCTYPE html>',
     '<html>',
@@ -334,23 +338,35 @@ function generateMermaidHtml(title: string, mermaidCode: string): string {
     '  <meta charset="utf-8">',
     '  <title>' + title + '</title>',
     '  <meta name="viewport" content="width=device-width, initial-scale=1">',
-    '  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>',
+    '  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js" onerror="window.mermaidLoadError=true"></script>',
     '  <script>',
+    '    function initMermaid() {',
+    '      if (window.mermaid && !window.mermaidLoadError) {',
+    '        try {',
+    '          mermaid.initialize({',
+    '            startOnLoad: true,',
+    '            theme: "dark",',
+    '            themeVariables: {',
+    '              darkMode: true,',
+    '              background: "#090d16",',
+    '              primaryColor: "#38bdf8",',
+    '              primaryTextColor: "#f8fafc",',
+    '              primaryBorderColor: "#0284c7",',
+    '              lineColor: "#64748b",',
+    '              secondaryColor: "#1e293b",',
+    '              tertiaryColor: "#0f172a"',
+    '            }',
+    '          });',
+    '          return;',
+    '        } catch (e) {}',
+    '      }',
+    '      var fallbackEl = document.getElementById("mermaid-ast-fallback");',
+    '      var mermaidEl = document.getElementById("mermaid-svg-container");',
+    '      if (fallbackEl) fallbackEl.style.display = "block";',
+    '      if (mermaidEl) mermaidEl.style.display = "none";',
+    '    }',
     '    document.addEventListener("DOMContentLoaded", function() {',
-    '      mermaid.initialize({',
-    '        startOnLoad: true,',
-    '        theme: "dark",',
-    '        themeVariables: {',
-    '          darkMode: true,',
-    '          background: "#090d16",',
-    '          primaryColor: "#38bdf8",',
-    '          primaryTextColor: "#f8fafc",',
-    '          primaryBorderColor: "#0284c7",',
-    '          lineColor: "#64748b",',
-    '          secondaryColor: "#1e293b",',
-    '          tertiaryColor: "#0f172a"',
-    '        }',
-    '      });',
+    '      setTimeout(initMermaid, 150);',
     '    });',
     '  </script>',
     '  <style>',
@@ -371,7 +387,7 @@ function generateMermaidHtml(title: string, mermaidCode: string): string {
     '      flex-direction: column;',
     '      align-items: center;',
     '      justify-content: flex-start;',
-    '      padding: 40px 24px;',
+    '      padding: 30px 24px;',
     '      box-sizing: border-box;',
     '    }',
     '    .mermaid {',
@@ -391,12 +407,56 @@ function generateMermaidHtml(title: string, mermaidCode: string): string {
     '      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace !important;',
     '      font-size: 13px !important;',
     '    }',
+    '    .ast-box {',
+    '      width: 100%;',
+    '      max-width: 900px;',
+    '      background: rgba(15, 23, 42, 0.85);',
+    '      border: 1px solid rgba(56, 189, 248, 0.25);',
+    '      border-radius: 12px;',
+    '      padding: 24px;',
+    '      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);',
+    '    }',
+    '    .ast-header {',
+    '      display: flex;',
+    '      justify-content: space-between;',
+    '      align-items: center;',
+    '      margin-bottom: 16px;',
+    '      border-bottom: 1px solid rgba(255, 255, 255, 0.08);',
+    '      padding-bottom: 12px;',
+    '    }',
+    '    .ast-title { font-size: 13px; font-weight: 600; color: #38bdf8; font-family: monospace; }',
+    '    .copy-btn {',
+    '      background: rgba(56, 189, 248, 0.15);',
+    '      border: 1px solid rgba(56, 189, 248, 0.3);',
+    '      color: #38bdf8;',
+    '      padding: 4px 10px;',
+    '      border-radius: 6px;',
+    '      font-size: 11px;',
+    '      cursor: pointer;',
+    '      font-family: monospace;',
+    '    }',
+    '    .copy-btn:hover { background: rgba(56, 189, 248, 0.25); }',
+    '    pre {',
+    '      margin: 0;',
+    '      font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;',
+    '      font-size: 12.5px;',
+    '      line-height: 1.6;',
+    '      color: #e2e8f0;',
+    '      overflow-x: auto;',
+    '    }',
     '  </style>',
     '</head>',
     '<body>',
     '  <div class="canvas-wrap">',
-    '    <div class="mermaid">',
-    mermaidCode,
+    '    <div id="mermaid-svg-container" class="mermaid">',
+    escapedMermaid,
+    '    </div>',
+    '    <div id="mermaid-ast-fallback" class="ast-box" style="display:none;">',
+    '      <div class="ast-header">',
+    '        <span class="ast-title">Mermaid AST Definition</span>',
+    '        <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById(\'raw-ast\').innerText)">Copy AST</button>',
+    '      </div>',
+    '      <pre id="raw-ast"><code>' + escapedMermaid + '</code></pre>',
     '    </div>',
     '  </div>',
     '</body>',
@@ -491,8 +551,8 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }
         badgeClass: so.badgeClass || "bg-indigo-500/15 text-indigo-400 border-indigo-500/30",
         hoverBorderClass: so.hoverBorderClass || "hover:border-indigo-500/50 hover:shadow-indigo-500/10",
         sources: so.sources || DIAGRAMS[0].sources,
-        htmlFile: so.htmlFile || "architecture.html",
-        specFile: so.specFile || "specs/architecture.json",
+        htmlFile: so.htmlFile || "system-overview.html",
+        specFile: so.specFile || "specs/system-overview.json",
         durationMs: so.durationMs || 5929,
       };
     }
@@ -503,7 +563,7 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }
   const previouslyGeneratedDiagrams: DiagramItem[] = useMemo(() => {
     if (repoCatalog?.generated_diagrams && Array.isArray(repoCatalog.generated_diagrams)) {
       const fromCatalog = repoCatalog.generated_diagrams
-        .filter((d: any) => d.id !== systemOverviewDiagram.id)
+        .filter((d: any) => d.id !== systemOverviewDiagram.id && d.id !== DIAGRAMS[0].id)
         .map((d: any) => {
           const matchExisting = DIAGRAMS.find((ex) => ex.id === d.id);
           return {
@@ -525,10 +585,19 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }
     return DIAGRAMS.slice(1);
   }, [repoCatalog, systemOverviewDiagram.id]);
 
-  const allDiagrams = useMemo(
-    () => [systemOverviewDiagram, ...previouslyGeneratedDiagrams, ...recommendedList],
-    [systemOverviewDiagram, previouslyGeneratedDiagrams, recommendedList]
-  );
+  const allDiagrams = useMemo(() => {
+    const list: DiagramItem[] = [DIAGRAMS[0]];
+    if (systemOverviewDiagram.id !== DIAGRAMS[0].id) {
+      list.push(systemOverviewDiagram);
+    }
+    previouslyGeneratedDiagrams.forEach((d) => {
+      if (!list.some((item) => item.id === d.id)) list.push(d);
+    });
+    recommendedList.forEach((d) => {
+      if (!list.some((item) => item.id === d.id)) list.push(d);
+    });
+    return list;
+  }, [systemOverviewDiagram, previouslyGeneratedDiagrams, recommendedList]);
 
   const activeDiagram = useMemo(
     () => allDiagrams.find((d) => d.id === selectedId) || null,

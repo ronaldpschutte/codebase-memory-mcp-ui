@@ -1348,7 +1348,7 @@ export function runPostIndexSystemOverview(repoPath, projectName) {
 
   // Generate primary system overview diagram
   const systemOverviewDiagram = {
-    id: "architecture",
+    id: "system-overview",
     title: "System Overview: Architecture & Subsystems",
     type: "architecture",
     category: "structural",
