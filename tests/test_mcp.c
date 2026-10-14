@@ -2230,11 +2230,15 @@ TEST(server_handle_prompts_list_workflows) {
     ASSERT_NOT_NULL(strstr(resp, "\"id\":203"));
     ASSERT_NOT_NULL(strstr(resp, "\"name\":\"explore_codebase\""));
     ASSERT_NOT_NULL(strstr(resp, "\"name\":\"review_change_impact\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"name\":\"transplant_feature\""));
     ASSERT_NOT_NULL(strstr(resp, "\"name\":\"project\""));
     ASSERT_NOT_NULL(strstr(resp, "\"name\":\"question\""));
     ASSERT_NOT_NULL(strstr(resp, "\"name\":\"change\""));
     ASSERT_NOT_NULL(strstr(resp, "\"name\":\"base_branch\""));
-    ASSERT_NOT_NULL(strstr(resp, "\"required\":true"));
+    ASSERT_NOT_NULL(strstr(resp, "\"name\":\"source_project\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"name\":\"target_project\""));
+    ASSERT_NOT_NULL(strstr(resp, "\"name\":\"feature\""));
+    ASSERT_NULL(strstr(resp, "\"required\":true"));
     ASSERT_NULL(strstr(resp, "\"nextCursor\""));
 
     free(resp);
@@ -2289,12 +2293,35 @@ TEST(server_handle_prompts_get_validates_arguments) {
     ASSERT_NOT_NULL(strstr(resp, "Invalid prompt name"));
     free(resp);
 
+    /* Omitted arguments now succeed with fallback placeholders and agent directives */
     resp = cbm_mcp_server_handle(srv, "{\"jsonrpc\":\"2.0\",\"id\":207,\"method\":\"prompts/get\","
                                       "\"params\":{\"name\":\"explore_codebase\",\"arguments\":{"
                                       "\"project\":\"payments\"}}}");
     ASSERT_NOT_NULL(resp);
-    ASSERT_NOT_NULL(strstr(resp, "\"code\":-32602"));
-    ASSERT_NOT_NULL(strstr(resp, "Missing required prompt arguments"));
+    ASSERT_NULL(strstr(resp, "\"error\""));
+    ASSERT_NOT_NULL(strstr(resp, "payments"));
+    ASSERT_NOT_NULL(strstr(resp, "<question>"));
+    ASSERT_NOT_NULL(strstr(resp, "Agent Directives"));
+    free(resp);
+
+    /* Zero arguments invocation succeeds */
+    resp = cbm_mcp_server_handle(srv, "{\"jsonrpc\":\"2.0\",\"id\":2071,\"method\":\"prompts/get\","
+                                      "\"params\":{\"name\":\"explore_codebase\"}}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NULL(strstr(resp, "\"error\""));
+    ASSERT_NOT_NULL(strstr(resp, "<project>"));
+    ASSERT_NOT_NULL(strstr(resp, "<question>"));
+    free(resp);
+
+    /* Transplant feature prompt succeeds without arguments */
+    resp = cbm_mcp_server_handle(srv, "{\"jsonrpc\":\"2.0\",\"id\":2072,\"method\":\"prompts/get\","
+                                      "\"params\":{\"name\":\"transplant_feature\"}}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NULL(strstr(resp, "\"error\""));
+    ASSERT_NOT_NULL(strstr(resp, "<source_project>"));
+    ASSERT_NOT_NULL(strstr(resp, "<target_project>"));
+    ASSERT_NOT_NULL(strstr(resp, "<feature>"));
+    ASSERT_NOT_NULL(strstr(resp, "cross-repo-transplant"));
     free(resp);
 
     /* Optional means it may be omitted, not that an explicitly invalid value

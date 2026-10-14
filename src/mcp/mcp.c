@@ -1341,9 +1341,9 @@ static char *cbm_mcp_prompts_list(void) {
                            "Explore a codebase with graph-first structural discovery.");
     yyjson_mut_val *explore_arguments = yyjson_mut_arr(doc);
     mcp_add_prompt_argument(doc, explore_arguments, "project", "Project",
-                            "Indexed project name from list_projects.", true);
+                            "Indexed project name from list_projects.", false);
     mcp_add_prompt_argument(doc, explore_arguments, "question", "Question",
-                            "Architecture or implementation question to investigate.", true);
+                            "Architecture or implementation question to investigate.", false);
     yyjson_mut_obj_add_val(doc, explore, "arguments", explore_arguments);
     yyjson_mut_arr_add_val(prompts, explore);
 
@@ -1354,13 +1354,28 @@ static char *cbm_mcp_prompts_list(void) {
                            "Review affected callers, tests, boundaries, and risks.");
     yyjson_mut_val *review_arguments = yyjson_mut_arr(doc);
     mcp_add_prompt_argument(doc, review_arguments, "project", "Project",
-                            "Indexed project name from list_projects.", true);
+                            "Indexed project name from list_projects.", false);
     mcp_add_prompt_argument(doc, review_arguments, "change", "Change",
-                            "Change, symbol, or area whose impact should be reviewed.", true);
+                            "Change, symbol, or area whose impact should be reviewed.", false);
     mcp_add_prompt_argument(doc, review_arguments, "base_branch", "Base branch",
                             "Git branch or ref for detect_changes; defaults to main.", false);
     yyjson_mut_obj_add_val(doc, review, "arguments", review_arguments);
     yyjson_mut_arr_add_val(prompts, review);
+
+    yyjson_mut_val *transplant = yyjson_mut_obj(doc);
+    yyjson_mut_obj_add_str(doc, transplant, "name", "transplant_feature");
+    yyjson_mut_obj_add_str(doc, transplant, "title", "Transplant feature between repositories");
+    yyjson_mut_obj_add_str(doc, transplant, "description",
+                           "Port a function, module, or capability from one indexed repo into another.");
+    yyjson_mut_val *transplant_arguments = yyjson_mut_arr(doc);
+    mcp_add_prompt_argument(doc, transplant_arguments, "source_project", "Source project",
+                            "Origin project name from list_projects.", false);
+    mcp_add_prompt_argument(doc, transplant_arguments, "target_project", "Target project",
+                            "Destination project name from list_projects.", false);
+    mcp_add_prompt_argument(doc, transplant_arguments, "feature", "Feature or symbol",
+                            "Name of function, class, or capability to port.", false);
+    yyjson_mut_obj_add_val(doc, transplant, "arguments", transplant_arguments);
+    yyjson_mut_arr_add_val(prompts, transplant);
 
     yyjson_mut_obj_add_val(doc, root, "prompts", prompts);
     char *out = yy_doc_to_str(doc);
@@ -1429,7 +1444,8 @@ static char *cbm_mcp_prompt_get(const char *params_json, char **error_json) {
     const char *name = yyjson_get_str(name_value);
     bool is_explore = strcmp(name, "explore_codebase") == 0;
     bool is_review = strcmp(name, "review_change_impact") == 0;
-    if (!is_explore && !is_review) {
+    bool is_transplant = strcmp(name, "transplant_feature") == 0;
+    if (!is_explore && !is_review && !is_transplant) {
         *error_json = mcp_prompt_error_json(JSONRPC_INVALID_PARAMS, "Invalid prompt name");
         yyjson_doc_free(params_doc);
         return NULL;
@@ -1437,12 +1453,39 @@ static char *cbm_mcp_prompt_get(const char *params_json, char **error_json) {
 
     yyjson_val *arguments = yyjson_obj_get(params, "arguments");
     const char *project = mcp_prompt_string_argument(arguments, "project");
-    const char *request = mcp_prompt_string_argument(arguments, is_explore ? "question" : "change");
-    if (!project || !request) {
-        *error_json =
-            mcp_prompt_error_json(JSONRPC_INVALID_PARAMS, "Missing required prompt arguments");
-        yyjson_doc_free(params_doc);
-        return NULL;
+    if (!project) {
+        project = "<project>";
+    }
+
+    const char *request = NULL;
+    if (is_explore) {
+        request = mcp_prompt_string_argument(arguments, "question");
+        if (!request) {
+            request = "<question>";
+        }
+    } else if (is_review) {
+        request = mcp_prompt_string_argument(arguments, "change");
+        if (!request) {
+            request = "<change>";
+        }
+    }
+
+    const char *source_project = NULL;
+    const char *target_project = NULL;
+    const char *feature = NULL;
+    if (is_transplant) {
+        source_project = mcp_prompt_string_argument(arguments, "source_project");
+        if (!source_project) {
+            source_project = "<source_project>";
+        }
+        target_project = mcp_prompt_string_argument(arguments, "target_project");
+        if (!target_project) {
+            target_project = "<target_project>";
+        }
+        feature = mcp_prompt_string_argument(arguments, "feature");
+        if (!feature) {
+            feature = "<feature>";
+        }
     }
 
     const char *base_branch = "main";
@@ -1460,34 +1503,68 @@ static char *cbm_mcp_prompt_get(const char *params_json, char **error_json) {
 
     static const char EXPLORE_TEMPLATE[] =
         "Explore project \"%s\" to answer: %s\n\n"
-        "Use graph tools first: search_graph to find relevant symbols, get_code_snippet for "
+        "Agent Directives:\n"
+        "1. If project or question is unspecified or placeholder (<project>, <question>), "
+        "call list_projects and prompt the user with clarifying questions before proceeding.\n"
+        "2. If multiple projects are relevant, ask the user whether to analyze a single project or cross-compare.\n"
+        "3. Use graph tools first: search_graph to find relevant symbols, get_code_snippet for "
         "exact source, and trace_path(direction=\"both\") for callers and callees. Use "
         "get_architecture for broad orientation and query_graph only for multi-hop patterns. "
         "Check has_more and paginate. Fall back to search_code or grep only for literal or "
         "non-code text, or where graph coverage is incomplete.";
+
     static const char REVIEW_TEMPLATE[] =
         "Review change impact in project \"%s\" for: %s\n\n"
-        "Use detect_changes with base_branch \"%s\", then trace_path(direction=\"both\", "
+        "Agent Directives:\n"
+        "1. If project or change is unspecified or placeholder (<project>, <change>), "
+        "call list_projects and prompt the user to specify the target project and change before proceeding.\n"
+        "2. Use detect_changes with base_branch \"%s\", then trace_path(direction=\"both\", "
         "include_tests=true) for affected callers, callees, and tests. Read exact definitions "
         "with get_code_snippet and use query_graph for cross-boundary patterns. Report affected "
         "callers, tests, boundaries, and risks; do not modify files.";
 
-    size_t text_size = strlen(project) + strlen(request) + strlen(base_branch) +
-                       (is_explore ? sizeof(EXPLORE_TEMPLATE) : sizeof(REVIEW_TEMPLATE));
+    static const char TRANSPLANT_TEMPLATE[] =
+        "Transplant feature \"%s\" from source project \"%s\" into target project \"%s\".\n\n"
+        "Agent Directives:\n"
+        "1. If source_project, target_project, or feature is unspecified or placeholder (<source_project>, "
+        "<target_project>, <feature>), call list_projects and prompt the user to select source and "
+        "target repositories and specify the feature.\n"
+        "2. Activate skill `cross-repo-transplant`.\n"
+        "3. Slicing: Locate the feature in the source project via search_graph, compute its full outbound "
+        "call closure via trace_path, and retrieve source definitions with get_code_snippet.\n"
+        "4. Configuration & Tests: Query get_env_vars for required configs and audit_test_coverage for tests.\n"
+        "5. Target Alignment: Inspect target project via get_architecture, adapt code to target conventions, "
+        "and port unit tests to verify parity.";
+
+    size_t text_size = 0;
+    if (is_explore) {
+        text_size = strlen(project) + strlen(request) + sizeof(EXPLORE_TEMPLATE) + 64;
+    } else if (is_review) {
+        text_size = strlen(project) + strlen(request) + strlen(base_branch) + sizeof(REVIEW_TEMPLATE) + 64;
+    } else {
+        text_size = strlen(source_project) + strlen(target_project) + strlen(feature) +
+                    sizeof(TRANSPLANT_TEMPLATE) + 64;
+    }
+
     char *text = malloc(text_size);
     if (!text) {
         *error_json = mcp_prompt_error_json(JSONRPC_INTERNAL_ERROR, "Internal error");
         yyjson_doc_free(params_doc);
         return NULL;
     }
+
     if (is_explore) {
         snprintf(text, text_size, EXPLORE_TEMPLATE, project, request);
-    } else {
+    } else if (is_review) {
         snprintf(text, text_size, REVIEW_TEMPLATE, project, request, base_branch);
+    } else {
+        snprintf(text, text_size, TRANSPLANT_TEMPLATE, feature, source_project, target_project);
     }
 
-    char *result = mcp_prompt_result(
-        is_explore ? "Graph-first codebase exploration" : "Graph-first change-impact review", text);
+    const char *desc = is_explore ? "Graph-first codebase exploration"
+                                  : (is_review ? "Graph-first change-impact review"
+                                               : "Cross-repository feature transplanting");
+    char *result = mcp_prompt_result(desc, text);
     free(text);
     yyjson_doc_free(params_doc);
     return result;
