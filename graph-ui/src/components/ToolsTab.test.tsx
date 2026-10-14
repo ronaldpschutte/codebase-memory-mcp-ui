@@ -80,10 +80,15 @@ describe("ToolsTab", () => {
     expect(screen.queryByText("delete_project")).not.toBeInTheDocument();
   });
 
-  it("expands tool details and displays parameter table and copy buttons", () => {
+  it("expands tool details and displays parameter table and copy buttons on click", () => {
     render(<ToolsTab selectedProject="sample-repo" />);
 
-    // By default export_diagram is expanded
+    // By default all tools start collapsed
+    expect(screen.queryByText("Parameters (6 total, 2 required)")).not.toBeInTheDocument();
+
+    // Expand export_diagram on click
+    fireEvent.click(screen.getByText("export_diagram"));
+
     expect(screen.getByText("Parameters (6 total, 2 required)")).toBeInTheDocument();
     expect(screen.getByText("Active Project: sample-repo")).toBeInTheDocument();
 

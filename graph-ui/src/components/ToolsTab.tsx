@@ -795,7 +795,7 @@ export function ToolsTab({ selectedProject }: ToolsTabProps) {
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<CategoryFilter>("All");
   const [readOnlyOnly, setReadOnlyOnly] = useState(false);
-  const [expandedTool, setExpandedTool] = useState<string | null>("export_diagram");
+  const [expandedTool, setExpandedTool] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const categories: CategoryFilter[] = [
