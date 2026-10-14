@@ -9,7 +9,15 @@ import { ReportsTab } from "./components/reports/ReportsTab";
 import { AdrTab } from "./components/AdrTab";
 import type { TabId } from "./lib/types";
 import { useUiMessages } from "./lib/i18n";
-import { FolderGit2, ChevronDown, Check, X } from "lucide-react";
+import {
+  FolderGit2,
+  ChevronDown,
+  Check,
+  X,
+  CheckSquare,
+  Square,
+  Crosshair,
+} from "lucide-react";
 
 const TAB_IDS: TabId[] = [
   "stats",
@@ -24,7 +32,7 @@ const TAB_IDS: TabId[] = [
 
 interface RouteState {
   tab: TabId;
-  project: string | null;
+  projects: string[];
   diagram: string | null;
 }
 
@@ -34,23 +42,51 @@ interface ProjectHeaderItem {
   branch?: string;
 }
 
-/* Read the active tab + selected project + diagram from the URL query string so the
+/* Read the active tab + selected projects + diagram from the URL query string so the
  * current view survives refreshes and can be bookmarked or shared. */
 function readRoute(): RouteState {
   const params = new URLSearchParams(window.location.search);
   const rawTab = params.get("tab");
   const tab = TAB_IDS.includes(rawTab as TabId) ? (rawTab as TabId) : "stats";
-  const project = params.get("project");
   const diagram = params.get("diagram");
-  return { tab, project: project ? project : null, diagram: diagram ? diagram : null };
+
+  let projects: string[] = [];
+  const projectsParam = params.get("projects");
+  const singleProjectParam = params.get("project");
+
+  if (projectsParam) {
+    projects = projectsParam
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  } else if (singleProjectParam && singleProjectParam.trim() !== "") {
+    projects = [singleProjectParam.trim()];
+  }
+
+  return { tab, projects, diagram };
 }
 
 /* Build the canonical URL for a route, preserving the path and hash. */
-function routeUrl(tab: TabId, project: string | null, diagram: string | null = null): string {
+function routeUrl(
+  tab: TabId,
+  projects: string[] | string | null,
+  diagram: string | null = null
+): string {
   const params = new URLSearchParams();
   params.set("tab", tab);
-  if (project) params.set("project", project);
-  if (diagram && tab === "diagrams") params.set("diagram", diagram);
+
+  const projArr: string[] = Array.isArray(projects)
+    ? projects.filter(Boolean)
+    : projects && typeof projects === "string" && projects.trim() !== ""
+    ? [projects.trim()]
+    : [];
+
+  if (projArr.length > 0) {
+    params.set("projects", projArr.join(","));
+  }
+  if (diagram && tab === "diagrams") {
+    params.set("diagram", diagram);
+  }
   return `${window.location.pathname}?${params.toString()}${window.location.hash}`;
 }
 
@@ -63,7 +99,8 @@ export function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const { tab: activeTab, project: selectedProject, diagram: activeDiagram } = route;
+  const { tab: activeTab, projects: selectedProjects, diagram: activeDiagram } = route;
+  const selectedProject = selectedProjects.length > 0 ? selectedProjects[0] : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -131,7 +168,7 @@ export function App() {
   /* Normalize the URL on first load so it always carries the current route. */
   useEffect(() => {
     const initial = readRoute();
-    window.history.replaceState(null, "", routeUrl(initial.tab, initial.project, initial.diagram));
+    window.history.replaceState(null, "", routeUrl(initial.tab, initial.projects, initial.diagram));
   }, []);
 
   /* Sync state when the user navigates with the browser back/forward buttons. */
@@ -143,12 +180,21 @@ export function App() {
 
   /* Change the route and push a history entry (skips no-op navigations). */
   const navigate = useCallback(
-    (tab: TabId, project: string | null, diagram: string | null = null) => {
-      const url = routeUrl(tab, project, diagram);
+    (
+      tab: TabId,
+      projects: string[] | string | null,
+      diagram: string | null = null
+    ) => {
+      const projArr: string[] = Array.isArray(projects)
+        ? projects.filter(Boolean)
+        : projects && typeof projects === "string" && projects.trim() !== ""
+        ? [projects.trim()]
+        : [];
+      const url = routeUrl(tab, projArr, diagram);
       const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
       if (url === current) return;
       window.history.pushState(null, "", url);
-      setRoute({ tab, project, diagram });
+      setRoute({ tab, projects: projArr, diagram });
     },
     []
   );
@@ -197,12 +243,7 @@ export function App() {
             {globalTabs.map((tab) => (
               <button
                 key={tab.id}
-                onClick={() =>
-                  navigate(
-                    tab.id,
-                    tab.id === "stats" ? null : selectedProject
-                  )
-                }
+                onClick={() => navigate(tab.id, selectedProjects)}
                 className={`px-3 py-1 rounded-md text-[12px] font-medium transition-all ${
                   activeTab === tab.id
                     ? "bg-primary/15 text-primary shadow-xs font-semibold"
@@ -221,11 +262,15 @@ export function App() {
               <button
                 key={tab.id}
                 onClick={() => {
-                  const targetProject =
-                    selectedProject || (projects.length > 0 ? projects[0].name : null);
+                  const targetProjects =
+                    selectedProjects.length > 0
+                      ? selectedProjects
+                      : projects.length > 0
+                      ? [projects[0].name]
+                      : [];
                   navigate(
                     tab.id,
-                    targetProject,
+                    targetProjects,
                     tab.id === "diagrams" ? activeDiagram : null
                   );
                 }}
@@ -247,11 +292,15 @@ export function App() {
             <button
               onClick={() => setDropdownOpen((prev) => !prev)}
               className={`flex items-center gap-2 px-3 py-1 rounded-lg border text-xs transition-all cursor-pointer ${
-                selectedProject
+                selectedProjects.length > 0
                   ? "bg-primary/10 border-primary/30 text-primary hover:bg-primary/15 hover:border-primary/45"
                   : "bg-white/[0.03] border-border/40 text-muted-foreground hover:text-foreground hover:bg-white/[0.06]"
               }`}
-              title={selectedProject ? `Active Project: ${selectedProject}` : "Click to select a project"}
+              title={
+                selectedProjects.length > 0
+                  ? `Active Project Scope: ${selectedProjects.join(", ")}`
+                  : "Click to select projects (application-wide filter)"
+              }
               aria-haspopup="listbox"
               aria-expanded={dropdownOpen}
             >
@@ -261,9 +310,18 @@ export function App() {
                   Project
                 </span>
                 <span className="text-[12px] font-mono font-medium truncate max-w-[180px]">
-                  {selectedProject || "All Projects"}
+                  {selectedProjects.length === 0
+                    ? "All Projects"
+                    : selectedProjects.length === 1
+                    ? selectedProjects[0]
+                    : `${selectedProjects.length} Projects Selected`}
                 </span>
               </div>
+              {selectedProjects.length > 1 && (
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-primary/20 text-primary font-mono font-semibold">
+                  {selectedProjects.length}
+                </span>
+              )}
               <ChevronDown
                 className={`w-3.5 h-3.5 opacity-60 transition-transform ${
                   dropdownOpen ? "rotate-180" : ""
@@ -271,16 +329,16 @@ export function App() {
               />
             </button>
 
-            {selectedProject && (
+            {selectedProjects.length > 0 && (
               <button
                 onClick={() =>
                   navigate(
                     activeTab === "graph" || activeTab === "adr" ? "stats" : activeTab,
-                    null
+                    []
                   )
                 }
                 className="p-1 rounded-lg border border-border/30 hover:bg-white/[0.06] text-muted-foreground hover:text-foreground text-[12px] transition-colors"
-                title="Deselect project (switch to global view)"
+                title="Clear project filter (switch to global view)"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -289,7 +347,7 @@ export function App() {
 
           {/* Project Dropdown Menu */}
           {dropdownOpen && (
-            <div className="absolute right-0 mt-2 w-72 rounded-xl bg-[#0e2028] border border-border/50 shadow-2xl p-1.5 z-50 backdrop-blur-md animate-in fade-in zoom-in-95 duration-100">
+            <div className="absolute right-0 mt-2 w-80 rounded-xl bg-[#0e2028] border border-border/50 shadow-2xl p-2 z-50 backdrop-blur-md animate-in fade-in zoom-in-95 duration-100">
               {projects.length > 3 && (
                 <div className="p-1 mb-1">
                   <input
@@ -303,17 +361,40 @@ export function App() {
                 </div>
               )}
 
-              {/* All Projects item */}
+              {/* Action row: Select All & Clear All */}
+              <div className="flex items-center justify-between px-1.5 py-1 mb-1 text-[11px] text-muted-foreground/70">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allFiltered = filteredProjects.map((p) => p.name);
+                    const merged = Array.from(new Set([...selectedProjects, ...allFiltered]));
+                    navigate(activeTab, merged);
+                  }}
+                  className="hover:text-primary transition-colors flex items-center gap-1 font-medium"
+                >
+                  <CheckSquare className="w-3 h-3" /> Select All ({filteredProjects.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigate(activeTab, []);
+                  }}
+                  className="hover:text-destructive transition-colors flex items-center gap-1"
+                >
+                  <Square className="w-3 h-3" /> Clear ({selectedProjects.length})
+                </button>
+              </div>
+
+              {/* All Projects (Global) item */}
               <button
                 onClick={() => {
                   navigate(
                     activeTab === "graph" || activeTab === "adr" ? "stats" : activeTab,
-                    null
+                    []
                   );
-                  setDropdownOpen(false);
                 }}
-                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors ${
-                  !selectedProject
+                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors mb-1 ${
+                  selectedProjects.length === 0
                     ? "bg-primary/15 text-primary font-medium"
                     : "text-muted-foreground hover:text-foreground hover:bg-white/[0.04]"
                 }`}
@@ -322,41 +403,68 @@ export function App() {
                   <span className="w-2 h-2 rounded-full bg-muted-foreground/40" />
                   All Projects (Global)
                 </span>
-                {!selectedProject && <Check className="w-3.5 h-3.5 text-primary" />}
+                {selectedProjects.length === 0 && <Check className="w-3.5 h-3.5 text-primary" />}
               </button>
 
               <div className="h-px bg-border/30 my-1" />
 
-              {/* Projects List */}
+              {/* Projects List with Checkboxes and Focus Action */}
               <div className="max-h-60 overflow-y-auto space-y-0.5">
                 {filteredProjects.length > 0 ? (
                   filteredProjects.map((p) => {
-                    const isSelected = p.name === selectedProject;
+                    const isSelected = selectedProjects.includes(p.name);
                     return (
-                      <button
+                      <div
                         key={p.name}
-                        onClick={() => {
-                          navigate(activeTab, p.name);
-                          setDropdownOpen(false);
-                        }}
-                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors text-left ${
+                        className={`group w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-xs transition-colors text-left ${
                           isSelected
                             ? "bg-primary/15 text-primary font-medium"
                             : "text-foreground/80 hover:text-foreground hover:bg-white/[0.04]"
                         }`}
                       >
-                        <div className="min-w-0 pr-2">
-                          <p className="font-mono truncate">{p.name}</p>
-                          {p.branch && (
-                            <p className="text-[10px] text-muted-foreground/60 font-mono truncate">
-                              {p.branch}
-                            </p>
-                          )}
+                        <div
+                          className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer pr-1"
+                          onClick={() => {
+                            const next = isSelected
+                              ? selectedProjects.filter((n) => n !== p.name)
+                              : [...selectedProjects, p.name];
+                            navigate(activeTab, next);
+                          }}
+                        >
+                          <div
+                            className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                              isSelected
+                                ? "bg-primary border-primary text-black"
+                                : "border-border/60 group-hover:border-primary/60 bg-white/[0.02]"
+                            }`}
+                          >
+                            {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="font-mono truncate">{p.name}</p>
+                            {p.branch && (
+                              <p className="text-[10px] text-muted-foreground/60 font-mono truncate">
+                                {p.branch}
+                              </p>
+                            )}
+                          </div>
                         </div>
-                        {isSelected && (
-                          <Check className="w-3.5 h-3.5 text-primary shrink-0" />
-                        )}
-                      </button>
+
+                        {/* Focus Only Action Button */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(activeTab, [p.name]);
+                            setDropdownOpen(false);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 px-1.5 py-0.5 rounded text-[10px] border border-border/40 hover:bg-white/[0.08] text-foreground/60 hover:text-foreground flex items-center gap-1 transition-all shrink-0"
+                          title={`Focus exclusively on ${p.name}`}
+                        >
+                          <Crosshair className="w-2.5 h-2.5" />
+                          <span>Only</span>
+                        </button>
+                      </div>
                     );
                   })
                 ) : (
@@ -364,6 +472,20 @@ export function App() {
                     No matching projects
                   </p>
                 )}
+              </div>
+
+              {/* Dropdown Footer */}
+              <div className="mt-1 pt-1.5 border-t border-border/20 px-1 flex items-center justify-between text-[11px] text-muted-foreground">
+                <span className="font-mono text-[10px]">
+                  {selectedProjects.length} of {projects.length} selected
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setDropdownOpen(false)}
+                  className="px-2.5 py-0.5 rounded bg-primary/20 text-primary hover:bg-primary/30 text-xs font-medium transition-colors"
+                >
+                  Done
+                </button>
               </div>
             </div>
           )}
@@ -379,7 +501,7 @@ export function App() {
         ) : activeTab === "diagrams" ? (
           <DiagramsTab
             initialDiagram={activeDiagram}
-            onSelectDiagram={(d) => navigate("diagrams", selectedProject, d)}
+            onSelectDiagram={(d) => navigate("diagrams", selectedProjects, d)}
             selectedProject={selectedProject}
           />
         ) : activeTab === "tools" ? (
@@ -389,19 +511,29 @@ export function App() {
         ) : activeTab === "reports" ? (
           <ReportsTab
             selectedProject={selectedProject}
-            onSelectProject={(p) => navigate("reports", p)}
+            onSelectProject={(p) => navigate("reports", [p])}
           />
         ) : activeTab === "adr" ? (
           <AdrTab
             selectedProject={selectedProject}
-            onSelectProject={(p) => navigate("adr", p)}
+            onSelectProject={(p) => navigate("adr", [p])}
           />
         ) : (
           <StatsTab
-            onSelectProject={(p, targetTab = "graph") => navigate(targetTab, p)}
+            onSelectProject={(p, targetTab = "graph") => navigate(targetTab, [p])}
+            selectedProjects={selectedProjects}
+            onToggleProject={(p) => {
+              const isSelected = selectedProjects.includes(p);
+              const next = isSelected
+                ? selectedProjects.filter((n) => n !== p)
+                : [...selectedProjects, p];
+              navigate("stats", next);
+            }}
+            onSelectProjects={(projs) => navigate("stats", projs)}
           />
         )}
       </main>
     </div>
   );
 }
+

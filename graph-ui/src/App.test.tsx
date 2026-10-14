@@ -179,8 +179,18 @@ describe("App", () => {
 
   it("renders the persistent header project switcher button", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (typeof url === "string" && url.includes("/api/projects")) {
-        return new Response(JSON.stringify([{ name: "my-project", file_count: 10, symbol_count: 50 }]), { status: 200 });
+      if (url === "/rpc") {
+        return new Response(JSON.stringify({
+          result: {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                projects: [{ name: "my-project", root_path: "/my-project" }],
+                has_more: false,
+              }),
+            }],
+          },
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       return new Response(JSON.stringify({ lang: "en", version: "0.10.8" }), { status: 200 });
     }));
@@ -190,5 +200,87 @@ describe("App", () => {
     const switcher = await screen.findByRole("button", { name: /Project All Projects/i });
     expect(switcher).toBeInTheDocument();
     expect(switcher).toHaveAttribute("aria-haspopup", "listbox");
+  });
+
+  it("initializes multiple projects from ?projects= URL query param", async () => {
+    window.history.replaceState(null, "", "/?projects=proj-alpha,proj-beta");
+
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url === "/rpc") {
+        return new Response(JSON.stringify({
+          result: {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                projects: [
+                  { name: "proj-alpha", root_path: "/alpha" },
+                  { name: "proj-beta", root_path: "/beta" },
+                  { name: "proj-gamma", root_path: "/gamma" },
+                ],
+                has_more: false,
+              }),
+            }],
+          },
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ lang: "en", version: "0.10.8" }), { status: 200 });
+    }));
+
+    render(<App />);
+
+    // The switcher should display "2 Projects"
+    const switcher = await screen.findByRole("button", { name: /Project 2 Projects/i });
+    expect(switcher).toBeInTheDocument();
+  });
+
+  it("allows selecting, deselecting, and focusing projects in the multi-project dropdown", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url === "/rpc") {
+        return new Response(JSON.stringify({
+          result: {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                projects: [
+                  { name: "proj-alpha", root_path: "/alpha" },
+                  { name: "proj-beta", root_path: "/beta" },
+                ],
+                has_more: false,
+              }),
+            }],
+          },
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ lang: "en", version: "0.10.8" }), { status: 200 });
+    }));
+
+    render(<App />);
+
+    const switcher = await screen.findByRole("button", { name: /Project All Projects/i });
+    fireEvent.click(switcher);
+
+    // Wait for the project items to be loaded into the dropdown menu
+    expect(await screen.findByText("proj-alpha")).toBeInTheDocument();
+    expect(screen.getByText("proj-beta")).toBeInTheDocument();
+
+    // Dropdown menu should be visible with Select All and Clear buttons
+    const selectAllBtn = screen.getByRole("button", { name: /Select All/i });
+    const clearBtn = screen.getByRole("button", { name: /Clear/i });
+    expect(selectAllBtn).toBeInTheDocument();
+    expect(clearBtn).toBeInTheDocument();
+
+    // Click "Select All"
+    fireEvent.click(selectAllBtn);
+    expect(window.location.search).toContain("projects=proj-alpha%2Cproj-beta");
+
+    // Click "Focus Only" for proj-alpha
+    const focusAlphaBtn = screen.getByTitle("Focus exclusively on proj-alpha");
+    fireEvent.click(focusAlphaBtn);
+    expect(window.location.search).toContain("projects=proj-alpha");
+
+    // Click quick-clear button in the header
+    const quickClearBtn = screen.getByTitle("Clear project filter (switch to global view)");
+    fireEvent.click(quickClearBtn);
+    expect(window.location.search).not.toContain("projects=");
   });
 });

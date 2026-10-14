@@ -3,11 +3,15 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useProjects } from "../hooks/useProjects";
 import { colorForLabel } from "../lib/colors";
 import { useUiMessages } from "../lib/i18n";
+import { Check, X } from "lucide-react";
 
 import type { TabId } from "../lib/types";
 
 interface StatsTabProps {
   onSelectProject: (project: string, tab?: TabId) => void;
+  selectedProjects?: string[];
+  onToggleProject?: (project: string) => void;
+  onSelectProjects?: (projects: string[]) => void;
 }
 
 /* ── Glowy health dot ───────────────────────────────────── */
@@ -405,20 +409,39 @@ export function IndexProgress({ onDone }: { onDone: () => void }) {
 
 /* ── Main Stats Tab ─────────────────────────────────────── */
 
-export function StatsTab({ onSelectProject }: StatsTabProps) {
+export function StatsTab({
+  onSelectProject,
+  selectedProjects = [],
+  onToggleProject,
+  onSelectProjects,
+}: StatsTabProps) {
   const t = useUiMessages();
   const { projects, loading, error, refresh } = useProjects();
   const [showModal, setShowModal] = useState(false);
   const [indexing, setIndexing] = useState(false);
 
+  const isFiltered = selectedProjects.length > 0;
+
+  const filteredProjects = useMemo(() => {
+    if (!isFiltered) return projects;
+    return projects.filter((p) => selectedProjects.includes(p.project.name));
+  }, [projects, isFiltered, selectedProjects]);
+
   const aggregate = useMemo(() => {
+    const targetProjects = isFiltered ? filteredProjects : projects;
     let totalNodes = 0, totalEdges = 0;
-    for (const p of projects) {
+    for (const p of targetProjects) {
       totalNodes += p.schema?.node_labels?.reduce((s, l) => s + l.count, 0) ?? p.project.nodes ?? 0;
       totalEdges += p.schema?.edge_types?.reduce((s, t) => s + t.count, 0) ?? p.project.edges ?? 0;
     }
-    return { projects: projects.length, nodes: totalNodes, edges: totalEdges };
-  }, [projects]);
+    return {
+      selectedCount: selectedProjects.length,
+      totalProjects: projects.length,
+      nodes: totalNodes,
+      edges: totalEdges,
+      isFiltered,
+    };
+  }, [projects, filteredProjects, isFiltered, selectedProjects.length]);
 
   const deleteProject = useCallback(async (name: string) => {
     if (!confirm(t.projects.deleteConfirm(name))) return;
@@ -431,13 +454,46 @@ export function StatsTab({ onSelectProject }: StatsTabProps) {
         {projects.length > 0 && (
           <div className="flex gap-4 mb-8">
             {[
-              { label: t.tabs.projects, value: aggregate.projects, color: "text-primary" },
-              { label: t.projects.nodes, value: aggregate.nodes, color: "text-foreground/80" },
-              { label: t.projects.edges, value: aggregate.edges, color: "text-foreground/80" },
+              {
+                label: isFiltered ? "Selected Projects" : t.tabs.projects,
+                value: isFiltered
+                  ? `${aggregate.selectedCount} of ${aggregate.totalProjects}`
+                  : aggregate.totalProjects.toLocaleString(),
+                subtext: isFiltered ? "Active Filter" : "All Repositories",
+                color: "text-primary",
+              },
+              {
+                label: t.projects.nodes,
+                value: aggregate.nodes.toLocaleString(),
+                subtext: isFiltered ? "In Selection" : "Total Indexed",
+                color: "text-foreground/80",
+              },
+              {
+                label: t.projects.edges,
+                value: aggregate.edges.toLocaleString(),
+                subtext: isFiltered ? "In Selection" : "Total Relations",
+                color: "text-foreground/80",
+              },
             ].map((s) => (
-              <div key={s.label} className="flex-1 rounded-xl border border-border/30 bg-white/[0.02] p-4">
-                <p className="text-[10px] text-foreground/25 uppercase tracking-widest mb-1">{s.label}</p>
-                <p className={`text-[22px] font-semibold tabular-nums ${s.color}`}>{s.value.toLocaleString()}</p>
+              <div
+                key={s.label}
+                className={`flex-1 rounded-xl border p-4 transition-all ${
+                  isFiltered && s.label.includes("Selected")
+                    ? "border-primary/40 bg-primary/[0.04]"
+                    : "border-border/30 bg-white/[0.02]"
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-[10px] text-foreground/25 uppercase tracking-widest">
+                    {s.label}
+                  </p>
+                  <span className="text-[10px] font-mono text-muted-foreground/50">
+                    {s.subtext}
+                  </span>
+                </div>
+                <p className={`text-[22px] font-semibold tabular-nums ${s.color}`}>
+                  {s.value}
+                </p>
               </div>
             ))}
           </div>
@@ -446,10 +502,55 @@ export function StatsTab({ onSelectProject }: StatsTabProps) {
         {indexing && <IndexProgress onDone={() => { setIndexing(false); refresh(); }} />}
 
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-[15px] font-semibold text-foreground/80">{t.projects.indexedProjects}</h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-[15px] font-semibold text-foreground/80">
+              {t.projects.indexedProjects}
+            </h2>
+            {isFiltered && (
+              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-primary text-[11px] font-mono">
+                <span>{selectedProjects.length} filtered</span>
+                <button
+                  type="button"
+                  onClick={() => onSelectProjects?.([])}
+                  className="hover:text-destructive transition-colors ml-0.5"
+                  title="Clear filter"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            )}
+          </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => setShowModal(true)} className="px-3 py-1.5 rounded-lg bg-primary/15 hover:bg-primary/25 text-primary text-[12px] font-medium transition-all">+ {t.index.newIndex}</button>
-            <button onClick={refresh} disabled={loading} className="px-3 py-1.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.07] text-[12px] text-foreground/40 font-medium transition-all disabled:opacity-30">{loading ? "..." : t.common.refresh}</button>
+            {projects.length > 1 && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (selectedProjects.length === projects.length) {
+                    onSelectProjects?.([]);
+                  } else {
+                    onSelectProjects?.(projects.map((p) => p.project.name));
+                  }
+                }}
+                className="px-2.5 py-1.5 rounded-lg border border-border/30 bg-white/[0.02] hover:bg-white/[0.06] text-[11px] text-foreground/70 font-medium transition-all"
+              >
+                {selectedProjects.length === projects.length
+                  ? "Deselect All"
+                  : "Select All"}
+              </button>
+            )}
+            <button
+              onClick={() => setShowModal(true)}
+              className="px-3 py-1.5 rounded-lg bg-primary/15 hover:bg-primary/25 text-primary text-[12px] font-medium transition-all"
+            >
+              + {t.index.newIndex}
+            </button>
+            <button
+              onClick={refresh}
+              disabled={loading}
+              className="px-3 py-1.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.07] text-[12px] text-foreground/40 font-medium transition-all disabled:opacity-30"
+            >
+              {loading ? "..." : t.common.refresh}
+            </button>
           </div>
         </div>
 
@@ -464,16 +565,57 @@ export function StatsTab({ onSelectProject }: StatsTabProps) {
 
         <div className="space-y-3">
           {projects.map((p) => {
-            const totalNodes = p.schema?.node_labels?.reduce((s, l) => s + l.count, 0) ?? p.project.nodes ?? 0;
-            const totalEdges = p.schema?.edge_types?.reduce((s, t) => s + t.count, 0) ?? p.project.edges ?? 0;
+            const isSelected = selectedProjects.includes(p.project.name);
+            const totalNodes =
+              p.schema?.node_labels?.reduce((s, l) => s + l.count, 0) ??
+              p.project.nodes ??
+              0;
+            const totalEdges =
+              p.schema?.edge_types?.reduce((s, t) => s + t.count, 0) ??
+              p.project.edges ??
+              0;
             return (
-              <div key={p.project.name} className="rounded-xl border border-border/30 bg-white/[0.02] hover:bg-white/[0.035] transition-all p-5">
+              <div
+                key={p.project.name}
+                className={`rounded-xl border transition-all p-5 ${
+                  isSelected
+                    ? "border-primary/50 bg-primary/[0.035] shadow-sm shadow-primary/5"
+                    : "border-border/30 bg-white/[0.02] hover:bg-white/[0.035]"
+                }`}
+              >
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <div className="min-w-0 flex items-start gap-2.5">
-                    <div className="mt-1.5"><HealthDot name={p.project.name} /></div>
+                    {/* Checkbox button */}
+                    <button
+                      type="button"
+                      role="checkbox"
+                      aria-checked={isSelected}
+                      aria-label={`Select ${p.project.name}`}
+                      onClick={() => onToggleProject?.(p.project.name)}
+                      className={`mt-1 w-4 h-4 rounded border flex items-center justify-center transition-all cursor-pointer shrink-0 ${
+                        isSelected
+                          ? "bg-primary border-primary text-black"
+                          : "border-border/60 hover:border-primary/60 bg-white/[0.03]"
+                      }`}
+                      title={isSelected ? "Deselect project" : "Select project for multi-project filter"}
+                    >
+                      {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                    </button>
+                    <div className="mt-1.5">
+                      <HealthDot name={p.project.name} />
+                    </div>
                     <div className="min-w-0">
-                      <h3 className="text-[14px] font-semibold text-foreground/90 mb-0.5">{p.project.name}</h3>
-                      <p className="text-[11px] text-foreground/20 font-mono truncate">{p.project.root_path}</p>
+                      <h3 className="text-[14px] font-semibold text-foreground/90 mb-0.5 flex items-center gap-2">
+                        <span>{p.project.name}</span>
+                        {isSelected && (
+                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-primary/20 text-primary font-mono font-normal">
+                            Active Scope
+                          </span>
+                        )}
+                      </h3>
+                      <p className="text-[11px] text-foreground/20 font-mono truncate">
+                        {p.project.root_path}
+                      </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
@@ -524,13 +666,33 @@ export function StatsTab({ onSelectProject }: StatsTabProps) {
                 {p.schema && (
                   <>
                     <div className="flex gap-6 text-[12px] text-foreground/30 mb-3">
-                      <span><strong className="text-foreground/55 tabular-nums">{totalNodes.toLocaleString()}</strong> {t.projects.nodes}</span>
-                      <span><strong className="text-foreground/55 tabular-nums">{totalEdges.toLocaleString()}</strong> {t.projects.edges}</span>
+                      <span>
+                        <strong className="text-foreground/55 tabular-nums">
+                          {totalNodes.toLocaleString()}
+                        </strong>{" "}
+                        {t.projects.nodes}
+                      </span>
+                      <span>
+                        <strong className="text-foreground/55 tabular-nums">
+                          {totalEdges.toLocaleString()}
+                        </strong>{" "}
+                        {t.projects.edges}
+                      </span>
                     </div>
                     <div className="flex flex-wrap gap-1">
                       {p.schema.node_labels?.map((l) => (
-                        <span key={l.label} className="inline-flex items-center gap-1 px-1.5 py-[2px] rounded-md text-[10px] font-medium" style={{ backgroundColor: colorForLabel(l.label) + "10", color: colorForLabel(l.label) + "bb" }}>
-                          <span className="w-[4px] h-[4px] rounded-full" style={{ backgroundColor: colorForLabel(l.label) }} />
+                        <span
+                          key={l.label}
+                          className="inline-flex items-center gap-1 px-1.5 py-[2px] rounded-md text-[10px] font-medium"
+                          style={{
+                            backgroundColor: colorForLabel(l.label) + "10",
+                            color: colorForLabel(l.label) + "bb",
+                          }}
+                        >
+                          <span
+                            className="w-[4px] h-[4px] rounded-full"
+                            style={{ backgroundColor: colorForLabel(l.label) }}
+                          />
                           {l.label} {l.count.toLocaleString()}
                         </span>
                       ))}
@@ -541,6 +703,46 @@ export function StatsTab({ onSelectProject }: StatsTabProps) {
             );
           })}
         </div>
+
+        {/* Floating Multi-Project Action Bar */}
+        {isFiltered && (
+          <div className="sticky bottom-6 mt-6 z-30" data-testid="floating-scope-bar">
+            <div className="rounded-xl border border-primary/40 bg-[#0e2028]/95 backdrop-blur-md shadow-2xl p-3.5 flex items-center justify-between gap-4 animate-in fade-in slide-in-from-bottom-2 duration-150">
+              <div className="flex items-center gap-3">
+                <span className="flex h-2.5 w-2.5 rounded-full bg-primary animate-pulse" />
+                <span className="text-xs font-medium text-foreground">
+                  <strong className="text-primary font-semibold font-mono">
+                    {selectedProjects.length}
+                  </strong>{" "}
+                  {selectedProjects.length === 1 ? "project" : "projects"} selected for global scope
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onSelectProjects?.([])}
+                  className="px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-white/[0.05] rounded-md transition-colors"
+                >
+                  Clear Selection
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSelectProject(selectedProjects[0], "graph")}
+                  className="px-3 py-1 text-xs bg-primary/20 text-primary hover:bg-primary/30 rounded-md font-medium transition-colors"
+                >
+                  View in Graph
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSelectProject(selectedProjects[0], "reports")}
+                  className="px-3 py-1 text-xs bg-white/[0.06] text-foreground hover:bg-white/[0.1] rounded-md font-medium transition-colors"
+                >
+                  View Reports
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
       {showModal && <CreateIndexModal onClose={() => setShowModal(false)} onCreated={() => { setIndexing(true); refresh(); }} />}
     </ScrollArea>
