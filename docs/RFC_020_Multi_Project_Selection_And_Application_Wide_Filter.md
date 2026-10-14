@@ -2,7 +2,7 @@
 
 - **RFC Number:** 020
 - **Title:** Multi-Project Selection & Application-Wide Scope Filtering
-- **Status:** Proposed
+- **Status:** Implemented
 - **Author:** Codebase Memory Architecture Team
 - **Target Subsystem:** `graph-ui/src/App.tsx`, `graph-ui/src/components/StatsTab.tsx`, `graph-ui/src/components/*`, `graph-ui/src/hooks/`
 - **Target Version:** v0.20.0
