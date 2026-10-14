@@ -197,6 +197,74 @@ export interface Shortcoming {
   skillTargetDir?: string;
 }
 
+export type ContextDocCategory =
+  | "primary_instruction"
+  | "architecture"
+  | "skill_runbook"
+  | "llm_index"
+  | "project_standard";
+
+export type TargetAgentEcosystem =
+  | "universal"
+  | "claude"
+  | "antigravity"
+  | "cursor"
+  | "copilot"
+  | "windsurf";
+
+export interface SymbolAnchorValidation {
+  symbol: string;
+  foundInGraph: boolean;
+  nodeType?: string;
+  qualifiedName?: string;
+  suggestedReplacement?: string;
+}
+
+export interface AgentContextDocument {
+  id: string;
+  path: string;
+  name: string;
+  category: ContextDocCategory;
+  targetAgents: TargetAgentEcosystem[];
+  status: "PRESENT" | "STALE" | "MISSING" | "EMPTY";
+  fileSizeBytes: number;
+  tokenCount: number;
+  lastModifiedCommit?: string;
+  lastModifiedDaysAgo?: number;
+  commitsBehindHead?: number;
+  hasBuildCommands?: boolean;
+  hasTestCommands?: boolean;
+  hasForbiddenPatterns?: boolean;
+  hasValidFrontmatter?: boolean;
+  contentSnippet?: string;
+  rawContent?: string;
+  symbolIntegrity?: {
+    totalReferencedSymbols: number;
+    validSymbolsCount: number;
+    driftedSymbols: SymbolAnchorValidation[];
+  };
+  scaffoldTemplateAvailable?: boolean;
+  scaffoldTemplate?: string;
+}
+
+export interface AgentContextInventory {
+  totalDocumentsFound: number;
+  totalTokenFootprint: number;
+  primaryTokenFootprint: number;
+  budgetStatus: "HEALTHY" | "MODERATE" | "BLOATED";
+  maxRecommendedTokens: number;
+  ecosystemCoverage: {
+    universal: boolean;
+    claude: boolean;
+    antigravity: boolean;
+    cursor: boolean;
+    copilot: boolean;
+    windsurf: boolean;
+  };
+  documents: AgentContextDocument[];
+  driftWarningsCount: number;
+}
+
 export interface AIReadinessReport {
   project: string;
   timestamp: string;
@@ -211,6 +279,7 @@ export interface AIReadinessReport {
     hygiene: PillarScore;
   };
   shortcomings: Shortcoming[];
+  context_inventory?: AgentContextInventory;
 }
 
 export interface McpToolParam {
