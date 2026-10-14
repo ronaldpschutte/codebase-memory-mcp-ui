@@ -782,6 +782,33 @@ export const MCP_TOOLS: McpToolDefinition[] = [
       2
     ),
   },
+  {
+    name: "transplant_feature",
+    category: "Governance & Schema",
+    summary: "Transplant functions, modules, algorithms, and capabilities between repositories with dependency closure extraction",
+    description:
+      "Performs cross-repository capability porting. Slices the full transitive outbound dependency closure (callees, helper types, constants), discovers environment requirements (get_env_vars), identifies covering unit tests (audit_test_coverage), and ports code cleanly to destination project conventions.",
+    readOnly: true,
+    idempotent: true,
+    parameters: [
+      { name: "source_project", type: "string", required: false, description: "Origin project name from list_projects" },
+      { name: "target_project", type: "string", required: false, description: "Destination project name from list_projects" },
+      { name: "feature", type: "string", required: false, description: "Name of function, class, or capability to port" },
+    ],
+    cliExample: "node scripts/transplant-feature.mjs --source={PROJECT} --target=destination-repo --feature=\"my_feature\"",
+    jsonExample: JSON.stringify(
+      {
+        name: "transplant_feature",
+        arguments: {
+          source_project: "{PROJECT}",
+          target_project: "destination-repo",
+          feature: "my_feature",
+        },
+      },
+      null,
+      2
+    ),
+  },
 ];
 
 type CategoryFilter = "All" | "Code Discovery" | "Tracing & Architecture" | "Indexing & Projects" | "Governance & Schema";

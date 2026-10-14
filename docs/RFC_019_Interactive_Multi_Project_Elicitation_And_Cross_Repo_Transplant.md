@@ -279,6 +279,31 @@ description: "Transplant functions, modules, and capabilities between indexed re
 3. Run the target repository test runner (`npm test`, `pytest`, `cargo test`, or `make test`) to verify 100% test pass rate.
 ```
 
+### 5.4 Web UI Integration: Tools & Capabilities Directory (`ToolsTab.tsx`)
+
+To ensure high visibility and immediate discoverability for developers and AI agents inspecting the UI, the `transplant_feature` capability is surfaced directly within the **MCP Tools Directory** (`graph-ui/src/components/ToolsTab.tsx`), expanding the catalog from 27 to 28 capabilities:
+
+- **Name:** `transplant_feature`
+- **Category:** `Governance & Schema` (or `Prompts & Workflows`)
+- **Badge:** `Capability / Workflow`
+- **Summary:** *Transplant functions, modules, algorithms, and capabilities between indexed repositories with dependency closure extraction, AST adaptation, and test porting.*
+- **Parameters:**
+  - `source_project`: *(optional)* Origin project name from `list_projects`
+  - `target_project`: *(optional)* Destination project name from `list_projects`
+  - `feature`: *(optional)* Name of function, class, or capability to port
+- **CLI Example:** `node scripts/transplant-feature.mjs --source={PROJECT} --target=destination-repo --feature="my_feature"`
+- **JSON RPC Example:**
+  ```json
+  {
+    "name": "transplant_feature",
+    "arguments": {
+      "source_project": "{PROJECT}",
+      "target_project": "destination-repo",
+      "feature": "my_feature"
+    }
+  }
+  ```
+
 ---
 
 ## 6. Verification & Test Plan
@@ -299,19 +324,26 @@ description: "Transplant functions, modules, and capabilities between indexed re
   2. The target files are written in proper TypeScript/React style.
   3. The ported unit tests run and pass cleanly.
 
+### 6.4 Web UI Verification (`ToolsTab.test.tsx`)
+- Verify `ToolsTab.test.tsx` renders 28 registered tools/capabilities including `transplant_feature`.
+- Verify parameter tables, copy buttons, and CLI/JSON examples render cleanly in the UI.
+
 ---
 
 ## 7. Implementation Checklist
 
-- [ ] **Phase 1: Core C Schema Relaxation (`src/mcp/mcp.c`)**
+- [x] **Phase 1: Core C Schema Relaxation (`src/mcp/mcp.c`)**
   - Update `cbm_mcp_prompts_list` (`required: false` on all arguments).
   - Register `transplant_feature` prompt template.
   - Update `cbm_mcp_prompt_get` with fallback placeholders and elicitation directives.
-  - Update `tests/test_mcp.c` unit tests.
+  - Update `tests/test_mcp.c` unit tests (373 tests passing).
   - Rebuild `codebase-memory-mcp.exe` via WSL/MinGW (`update_mcp_exe.ps1`).
-- [ ] **Phase 2: Agent Skill Definition**
+- [x] **Phase 2: Agent Skill Definition**
   - Create `.agents/skills/cross-repo-transplant/SKILL.md`.
   - Add runbook instructions for dependency closure slicing, target alignment, and test porting.
-- [ ] **Phase 3: Integration & Documentation**
-  - Update `ARCHITECTURE.md` and `docs/llms.txt`.
+- [x] **Phase 3: Integration & Scripts**
   - Add CLI helper script `scripts/transplant-feature.mjs` for headless cross-repo porting.
+- [ ] **Phase 4: Web UI Tools Directory Integration**
+  - Add `transplant_feature` to `MCP_TOOLS` in `graph-ui/src/components/ToolsTab.tsx`.
+  - Update `graph-ui/src/components/ToolsTab.test.tsx` (28 capabilities).
+  - Validate production bundle with `npm run build`.
