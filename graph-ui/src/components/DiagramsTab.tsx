@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { DiagramRecommendations } from "./DiagramRecommendations";
 import { MermaidViewer } from "./MermaidViewer";
+import { ScrollArea } from "./ui/scroll-area";
 import {
   DEFAULT_RECOMMENDED_DIAGRAMS,
   generateStylizedDiagramHtml,
@@ -826,7 +827,8 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }
       <div className="flex-1 min-h-0 relative overflow-hidden flex">
         {!activeDiagram ? (
           /* Gallery Mode */
-          <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-8 max-w-7xl mx-auto w-full">
+          <ScrollArea className="flex-1 h-full w-full">
+            <div className="p-6 md:p-8 space-y-8 max-w-7xl mx-auto w-full">
             {/* View Mode Toggle: Verified vs Recommended */}
             <div className="flex items-center gap-2 border-b border-border/40 pb-4">
               <button
@@ -1114,7 +1116,8 @@ export function DiagramsTab({ initialDiagram, onSelectDiagram, selectedProject }
             </div>
             </>
             )}
-          </div>
+            </div>
+          </ScrollArea>
         ) : (
           /* Interactive Viewer Mode */
           <div className="flex-1 flex flex-col h-full overflow-hidden">
