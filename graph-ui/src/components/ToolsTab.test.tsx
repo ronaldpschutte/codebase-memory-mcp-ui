@@ -10,11 +10,11 @@ describe("ToolsTab", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders all 28 MCP tools in the catalog", () => {
+  it("renders all 29 MCP tools in the catalog", () => {
     render(<ToolsTab selectedProject="test-project" />);
 
     expect(screen.getByText("MCP Tools Directory")).toBeInTheDocument();
-    expect(screen.getByText("28 Tools Registered")).toBeInTheDocument();
+    expect(screen.getByText("29 Tools Registered")).toBeInTheDocument();
 
     // Verify key tools are displayed
     expect(screen.getByText("search_graph")).toBeInTheDocument();
@@ -33,8 +33,9 @@ describe("ToolsTab", () => {
     expect(screen.getByText("get_code_snippet")).toBeInTheDocument();
     expect(screen.getByText("ai_readiness_audit")).toBeInTheDocument();
     expect(screen.getByText("transplant_feature")).toBeInTheDocument();
+    expect(screen.getByText("extract_features")).toBeInTheDocument();
 
-    expect(MCP_TOOLS.length).toBe(28);
+    expect(MCP_TOOLS.length).toBe(29);
   });
 
   it("filters tools by search text", () => {

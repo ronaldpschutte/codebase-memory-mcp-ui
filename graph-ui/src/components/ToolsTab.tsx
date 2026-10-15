@@ -809,6 +809,32 @@ export const MCP_TOOLS: McpToolDefinition[] = [
       2
     ),
   },
+  {
+    name: "extract_features",
+    category: "Governance & Schema",
+    summary: "Extract, catalog, and evaluate repository capabilities and features with autonomy and transplant readiness scoring (RFC 021)",
+    description:
+      "Performs automated repository feature extraction by synthesizing surface triggers (HTTP routes, CLI, MCP tools, UI tabs), call-graph boundaries, intent anchors (RFCs, ADRs), and test suites into a structured, functional Capability Catalog.",
+    readOnly: true,
+    idempotent: true,
+    parameters: [
+      { name: "project", type: "string", required: false, description: "Target project identifier in codebase-memory-mcp" },
+      { name: "scope_path", type: "string", required: false, description: "Optional folder/package path to scope feature extraction" },
+      { name: "granularity", type: "string", required: false, defaultVal: "coarse", enumVals: ["coarse", "fine"], description: "Extraction detail: coarse (domains) or fine (capabilities)" },
+    ],
+    cliExample: "node scripts/extract-features.mjs --project={PROJECT} --granularity=coarse",
+    jsonExample: JSON.stringify(
+      {
+        name: "extract_features",
+        arguments: {
+          project: "{PROJECT}",
+          granularity: "coarse",
+        },
+      },
+      null,
+      2
+    ),
+  },
 ];
 
 type CategoryFilter = "All" | "Code Discovery" | "Tracing & Architecture" | "Indexing & Projects" | "Governance & Schema";

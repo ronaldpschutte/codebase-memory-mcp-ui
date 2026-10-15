@@ -2,7 +2,7 @@
 
 - **RFC Number:** 021
 - **Title:** Automated Repository Feature Extraction & Capability Catalog
-- **Status:** Proposed
+- **Status:** Implemented
 - **Author:** Codebase Memory Architecture Team
 - **Target Subsystem:** `.agents/skills/feature-catalog/`, `scripts/extract-features.mjs`, `graph-ui/src/components/FeaturesTab.tsx`, `graph-ui/src/components/ToolsTab.tsx`
 - **Target Version:** v0.21.0
