@@ -2,7 +2,7 @@
 
 - **RFC Number:** 022
 - **Title:** Features & Capabilities Multi-Repository Comparison Page
-- **Status:** Proposed
+- **Status:** Implemented
 - **Author:** Codebase Memory Architecture Team
 - **Target Subsystem:** `graph-ui/src/App.tsx`, `graph-ui/src/components/FeaturesTab.tsx`, `graph-ui/src/lib/types.ts`, `graph-ui/src/lib/i18n.ts`, `graph-ui/src/components/FeaturesTab.test.tsx`
 - **Target Version:** v0.22.0

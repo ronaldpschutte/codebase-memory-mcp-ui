@@ -84,7 +84,49 @@ export interface SchemaInfo {
   total_edges: number;
 }
 
-export type TabId = "control" | "stats" | "diagrams" | "tools" | "graph" | "readiness" | "reports" | "adr";
+export type TabId = "control" | "stats" | "diagrams" | "features" | "tools" | "graph" | "readiness" | "reports" | "adr";
+
+export interface FeatureTrigger {
+  kind: "mcp_tool" | "mcp_prompt" | "http_route" | "ui_component" | "ui_tab" | "cli_script" | "c_api";
+  name?: string;
+  path?: string;
+}
+
+export interface FeatureVerification {
+  hasTests: boolean;
+  testSuites: string[];
+  testCount: number;
+}
+
+export interface FeatureTransplantReadiness {
+  autonomyScore: number;
+  coupling: "low" | "medium" | "high";
+  verdict: string;
+}
+
+export interface RepositoryFeature {
+  id: string;
+  name: string;
+  category: string;
+  summary: string;
+  documentation: string[];
+  surfaceTriggers: FeatureTrigger[];
+  coreFiles: string[];
+  dependencies: {
+    externalLibraries: string[];
+    sharedUtilities: string[];
+  };
+  verification: FeatureVerification;
+  transplantReadiness: FeatureTransplantReadiness;
+}
+
+export interface RepositoryFeatureCatalog {
+  project: string;
+  timestamp: string;
+  totalFeatures: number;
+  granularity: "coarse" | "fine";
+  features: RepositoryFeature[];
+}
 
 export type ReportPreset = "quick" | "comprehensive" | "custom";
 

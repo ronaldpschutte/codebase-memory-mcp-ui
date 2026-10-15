@@ -22,6 +22,9 @@ vi.mock("./components/ReadinessTab", () => ({
 vi.mock("./components/reports/ReportsTab", () => ({
   ReportsTab: () => <div data-testid="reports-tab">Reports Tab</div>,
 }));
+vi.mock("./components/FeaturesTab", () => ({
+  FeaturesTab: () => <div data-testid="features-tab">Features View</div>,
+}));
 vi.mock("./components/AdrTab", () => ({
   AdrTab: () => <div data-testid="adr-tab">ADR Tab</div>,
 }));
@@ -91,6 +94,33 @@ describe("App", () => {
 
     expect(await screen.findByTestId("diagrams-tab")).toBeInTheDocument();
     expect(window.location.search).toContain("tab=diagrams");
+  });
+
+  it("renders the features navigation tab between Diagrams and ADR and switches on click", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(JSON.stringify({ lang: "en", version: "0.10.8" }), { status: 200 }),
+    ));
+
+    render(<App />);
+
+    const diagramsBtn = screen.getByRole("button", { name: "Diagrams" });
+    const featuresBtn = screen.getByRole("button", { name: "Features" });
+    const adrBtn = screen.getByRole("button", { name: "ADR" });
+
+    expect(diagramsBtn).toBeInTheDocument();
+    expect(featuresBtn).toBeInTheDocument();
+    expect(adrBtn).toBeInTheDocument();
+
+    // Verify ordering in DOM: Diagrams -> Features -> ADR
+    expect(diagramsBtn.compareDocumentPosition(featuresBtn)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(featuresBtn.compareDocumentPosition(adrBtn)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+    await waitFor(() => {
+      fireEvent.click(featuresBtn);
+    });
+
+    expect(await screen.findByTestId("features-tab")).toBeInTheDocument();
+    expect(window.location.search).toContain("tab=features");
   });
 
   it("supports deep linking to a specific diagram via query params", async () => {

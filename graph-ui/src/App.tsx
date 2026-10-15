@@ -3,6 +3,7 @@ import { GraphTab } from "./components/GraphTab";
 import { StatsTab } from "./components/StatsTab";
 import { ControlTab } from "./components/ControlTab";
 import { DiagramsTab } from "./components/DiagramsTab";
+import { FeaturesTab } from "./components/FeaturesTab";
 import { ToolsTab } from "./components/ToolsTab";
 import { ReadinessTab } from "./components/ReadinessTab";
 import { ReportsTab } from "./components/reports/ReportsTab";
@@ -27,6 +28,7 @@ const TAB_IDS: TabId[] = [
   "reports",
   "readiness",
   "diagrams",
+  "features",
   "adr",
 ];
 
@@ -210,6 +212,7 @@ export function App() {
     { id: "reports", label: t.tabs.reports },
     { id: "readiness", label: t.tabs.readiness },
     { id: "diagrams", label: t.tabs.diagrams },
+    { id: "features", label: t.tabs.features || "Features" },
     { id: "adr", label: t.tabs.adr },
   ];
 
@@ -512,6 +515,14 @@ export function App() {
           <ReportsTab
             selectedProject={selectedProject}
             onSelectProject={(p) => navigate("reports", [p])}
+          />
+        ) : activeTab === "features" ? (
+          <FeaturesTab
+            selectedProjects={selectedProjects}
+            selectedProject={selectedProject}
+            onNavigateTab={(targetTab, targetProjects) =>
+              navigate(targetTab, targetProjects || selectedProjects)
+            }
           />
         ) : activeTab === "adr" ? (
           <AdrTab
